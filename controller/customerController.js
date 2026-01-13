@@ -23,6 +23,7 @@ const getAllCustomers = async (req, res) => {
   }
 };
 
+// works fine 12/01/2025
 const createCustomer = async (req, res) => {
 
     const { firstName, lastName, mobile_phone, email, address, customerType, landline_phone } = req.body;
@@ -426,6 +427,7 @@ const getOneCustomersWithDetails = async (req, res) => {
     }
 }
 
+//works fine 13/01/2025
 const getAllCustomersWithDetails = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
@@ -444,56 +446,6 @@ const getAllCustomersWithDetails = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
-
-// const getAllCustomersWithDetails = async (req, res) => {
-//     const page = parseInt(req.query.page) || 1;
-//     const pageSize = parseInt(req.query.pageSize) || 20;
-//     const from = (page - 1) * pageSize;
-//     const to = from + pageSize - 1;
-
-//     try {
-//         const { data, error, count } = await supabase
-//             .from('customers')
-//             .select(`
-//                 *,
-//                 businesses (*),
-//                 quotes (*),
-//                 jobs (*),
-//                 invoices (*),
-//                 payments (*)
-//             `, { count: 'exact' })
-//             .range(from, to)
-//             .order('created_at', { ascending: true });
-
-//         if (error) throw error;
-
-//         return res.status(200).json({
-//             page,
-//             pageSize,
-//             total: count,
-//             totalPages: Math.ceil(count / pageSize),
-//             data
-//         });
-//     } catch (err) {
-//         res.status(500).json({ error: err.message });
-//     }
-// };
-
-
-// const getAllCustomersWithDetails = async (req, res) => {
-
-//     try {
-//         const customers = await Customer.findAllCustomerWithDetails();
-//         if (!customers) {
-//             return res.status(404).json({ error: 'Customer not found' });
-//         }
-
-//         return res.status(200).json(customers);
-//     } catch (error) {
-//         return res.status(500).json({ error: error.message });
-//     }
-// }
 
 export  { 
     getAllCustomers,

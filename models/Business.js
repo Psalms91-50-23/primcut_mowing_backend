@@ -27,8 +27,9 @@ static async findByName(name) {
   const { data, error } = await supabase
     .from('businesses')
     .select('*')
-    .ilike('name', name) // case-insensitive match
-    .maybeSingle(); // if you expect only one unique name, else remove .single() for multiple
+    .ilike('name', name) 
+    .maybeSingle(); 
+    
   if (error) throw new Error(`Error fetching business with name "${name}": ${error.message}`);
   return data;
 }

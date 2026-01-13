@@ -1,4 +1,4 @@
-import supabase from "./config/db.js"; // your config file
+import supabase from "./config/db.js"; 
 import dotenv from 'dotenv';
 dotenv.config();
 

@@ -41,7 +41,6 @@ export const createJobFromQuote  = async (req, res) => {
             return res.status(404).json({ error: 'Quote not found' });
         }
 
-        // 2. Business rules
         if (quote.status !== 'accepted') {
             return res.status(400).json({
                 error: 'Job can only be created from an accepted quote'
@@ -66,7 +65,7 @@ export const createJobFromQuote  = async (req, res) => {
             exists = await Job.findByUUID(uuid);
         } while (exists);
 
-        // 3. Create job using quote data
+
         const job = await Job.createFromQuote({
             quote,
             uuid,

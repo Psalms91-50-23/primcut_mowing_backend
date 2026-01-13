@@ -118,7 +118,7 @@ class Customer {
             throw new Error(`Error updating customer with ID ${id}: ${error.message}`);
         }
         return data;
-        // return data.length > 0 ? data[0] : null;
+   
     }
 
      //works fine 9/01/2026 
@@ -227,21 +227,7 @@ class Customer {
 
         return { ...data, matchedType };
 
-    }
-
-    // static async findByPhone(phone) {
-    //     const { data, error } = await supabase
-    //         .from('customers')
-    //         .select('*')
-    //         .or(`landline_phone.eq.${phone},mobile_phone.eq.${phone}`)
-    //         .maybeSingle()
-    //         // .single();
-    //     if (error) {
-    //         throw new Error(`Error fetching customer with phone ${phone}: ${error.message}`);
-    //     }
-    //     // return data;
-    //     return data.length > 0 ? data[0] : null;
-    // }       
+    }   
 
     static async findByAddress(address) {
         const { data, error } = await supabase
@@ -253,7 +239,7 @@ class Customer {
             throw new Error(`Error fetching customer with address ${address}: ${error.message}`);
         }
         return data;
-        // return data.length > 0 ? data[0] : null;
+
     }   
 
     static async findByName(firstName, lastName) {
@@ -267,7 +253,7 @@ class Customer {
             throw new Error(`Error fetching customer with first name ${firstName} and last name ${lastName}: ${error.message}`);
         }
         return data;
-        // return data.length > 0 ? data[0] : null;
+       
     }
 
     static async findByBusinessUUID(business_uuid) {
@@ -280,7 +266,7 @@ class Customer {
             throw new Error(`Error fetching customers with business UUID ${business_uuid}: ${error.message}`);
         }
         return data;
-        // return data.length > 0 ? data[0] : null;
+        
     }   
 
     static async findOneCustomerWithDetails(uuid) {
@@ -310,51 +296,8 @@ class Customer {
 
         return data;
     }
-//works fine 11/01/2026
-    // static async findAllCustomerWithDetails() {
-    //     let query = supabase
-    //         .from('customers')
-    //         .select(`
-    //             *,
-    //             businesses (*),
-    //             quotes (*),
-    //             jobs (*,
-    //                 invoices (
-    //                     *,
-    //                     payments (*)
-    //                 )
-    //             )
-    //         `)
-    //         .order('created_at', { ascending: true });
 
-    //     const { data, error } = await query;
-
-    //     if (error) {
-    //         throw new Error(`Error fetching customers with details: ${error.message}`);
-    //     }
-
-    //     return data;
-    // }
-
-    // static async findAllWithDetails({ from = 0, to = 19 }) {
-    //     const { data, error, count } = await supabase
-    //         .from('customers')
-    //         .select(`
-    //             *,
-    //             businesses (*),
-    //             quotes (*),
-    //             jobs (*),
-    //             invoices (*),
-    //             payments (*)
-    //         `, { count: 'exact' })
-    //         .range(from, to)
-    //         .order('created_at', { ascending: true });
-
-    //     if (error) throw new Error(`Error fetching customers: ${error.message}`);
-
-    //     return { data, count };
-    // }
-
+    //works fine 13/01/2025
     static async findAllWithDetails({ page = 1, pageSize = 20 }) {
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
