@@ -1,4 +1,4 @@
-import supabase from "./config/db.js"; 
+import supabase from "./config/db.js";
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -18,8 +18,9 @@ console.info("Expire quotes function started");
         updated_at: nowISO,
       })
       .lte('expiry_end', nowISO)   // expiry_end <= now
-      .eq('status', 'pending')     // only pending quotes
-      .eq('is_expired', false);    // skip already expired
+      .in('status', ['draft', 'sent'])
+      .eq('is_expired', false)    // skip already expired
+      .select('*');
 
     if (error) {
       console.error('Error expiring quotes:', error.message);
@@ -33,7 +34,9 @@ console.info("Expire quotes function started");
       process.exit(1);
     }
 
-    console.info(`Quotes expired successfully at ${nowISO}, count: ${data?.length || 0}`);
+    console.info(
+    `Quotes expired: ${data.map(q => q.uuid).join(', ') || 'none'}`
+  );
 
     // Log success
     await supabase.from('function_logs').insert([
