@@ -1,13 +1,14 @@
 import express from 'express';
 const router = express.Router();
 
-import { 
+import {
     getAllJobs,
     getJobByUUID,
     createJobFromQuote,
     getJobByQuoteUUID,
-    hardDeleteJobByUUID
-} from '../controller/jobController.js';
+    hardDeleteJobByUUID,
+    updateByUUID
+} from '../controllers/jobController.js';
 
 // GET all jobs
 router.get('/all', getAllJobs);
@@ -23,5 +24,9 @@ router.get('/by-quote/:quote_uuid', getJobByQuoteUUID);
 
 // HARD DELETE job by UUID
 router.delete('/uuid/:uuid', hardDeleteJobByUUID);
+
+// UPDATE job by UUID
+router.patch('/uuid/:uuid', updateByUUID);
+
 
 export default router;

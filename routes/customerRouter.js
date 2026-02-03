@@ -15,12 +15,12 @@ import {
     getCustomerByPhone,
     getAllCustomersWithDetails,
     getOneCustomersWithDetails
-} from '../controller/customerController.js';
+} from '../controllers/customerController.js';
 
 const router = express.Router();
 
 // GET all customers
-router.get('/all', getAllCustomers);
+// router.get('/all', getAllCustomers);
 // GET all customers and details, t
 // router.get('/all/details', getAllCustomersWithDetails);
 // GET all customers and details with pagination and 
@@ -67,7 +67,7 @@ router.patch('/reinstate/uuid/:uuid', reinstateCustomer);
 router.delete('/hard-delete/uuid/:uuid', hardDeleteCustomer);
 
 // LINK customer to business
-router.patch('/:customer_uuid/link-business', linkCustomerToBusiness);
+router.patch('/uuid/:customer_uuid/link-business', linkCustomerToBusiness);
 
 
 export default router;

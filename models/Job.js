@@ -32,11 +32,11 @@ class Job {
                 quote_uuid: quote.uuid,
                 services: quote.services,          // JSON array ✔
                 total_amount: quote.total_amount,
-                scheduled_at,
+                scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
                 is_recurring,
                 recurrence_interval,
                 recurrence_frequency,
-                recurrence_end_date,
+                recurrence_end_date: recurrence_end_date ?? null,
                 status: 'scheduled',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
@@ -51,10 +51,7 @@ class Job {
     static async updateByUUID(uuid, updates) {
         const { data, error } = await supabase
             .from('jobs')
-            .update({
-                ...updates,
-                updated_at: new Date().toISOString()
-            })
+            .update(updates)
             .eq("uuid", uuid)
             .select('*')
             .maybeSingle();
@@ -87,5 +84,7 @@ class Job {
     }
 
 }
+
+
 
 export default Job;

@@ -8,7 +8,7 @@ import {
     softDeleteBusiness,
     reinstateBusiness,
     hardDeleteBusiness
-} from '../controller/businessController.js';
+} from '../controllers/businessController.js';
 
 const router = express.Router();
 
@@ -28,7 +28,7 @@ router.post('/', createBusiness);
 router.patch('/uuid/:uuid', updateBusinessByUUID);
 
 // SOFT DELETE business by UUID
-router.delete('/soft-delete/uuid/:uuid', softDeleteBusiness);
+router.patch('/soft-delete/uuid/:uuid', softDeleteBusiness);
 
 // REINSTATE business by UUID
 router.patch('/reinstate/uuid/:uuid', reinstateBusiness);

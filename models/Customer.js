@@ -56,11 +56,14 @@ class Customer {
             throw new Error(`Error fetching customer with ${field}=${value}: ${error.message}`);
         }
         return  data;
-        // return data.length > 0 ? data[0] : null;
+        
     }   
 
     //works fine 9/01/2026  
     static async findByUUID(uuid) {
+        if (!uuid) {
+            throw new Error("Customer UUID is required");
+        }
         const { data, error } = await supabase
             .from('customers')
             .select('*')
@@ -77,6 +80,9 @@ class Customer {
 
     //works fine 9/01/2026  
     static async findById(id) {
+        if (!id) {
+            throw new Error("Customer ID is required");
+        }
         const { data, error } = await supabase
             .from('customers')
             .select('*')
@@ -92,11 +98,14 @@ class Customer {
 
     //works fine
     static async create(customer) {
+        if (!customer) {
+            throw new Error("Customer data is required");
+        }
         const { data, error } = await supabase
             .from('customers')
             .insert([customer])
             .select()
-            .maybeSingle();
+            .single();
         if (error) {
             throw new Error(`Error creating customer: ${error.message}`);
         }
@@ -106,14 +115,18 @@ class Customer {
 
     //have not tested
     static async findByIdAndUpdate(id, customer) {
+        if (!id) {
+            throw new Error("Customer ID is required");
+        }
+        if (!customer) {
+            throw new Error("Customer data is required");
+        }
         const { data, error } = await supabase
             .from('customers')
-            .update({
-            ...customer,
-            updated_at: new Date().toISOString()
-            })
+            .update(customer)
             .eq('id', id)
-            .maybeSingle();
+            .select("*")
+            .single();
         if (error) {
             throw new Error(`Error updating customer with ID ${id}: ${error.message}`);
         }
@@ -123,44 +136,60 @@ class Customer {
 
      //works fine 9/01/2026 
     static async findByUUIDAndUpdate(uuid, customer) {
+        if (!uuid) {
+            throw new Error("Customer UUID is required");
+        }
+        if (!customer) {
+            throw new Error("Customer data is required");
+        }
         const { data, error } = await supabase
         .from('customers')
-        .update({
-        ...customer,
-        updated_at: new Date().toISOString()
-        })
+        .update(customer)
         .eq('uuid', uuid)
         .select()
         .single()
          
-        console.log({ data, error }, "in find cust by uuid and update"); // ✅ log after await
+        console.log({ data, error }, "in find cust by uuid and update");
         if (error) {
             throw new Error(`Error updating customer with UUID ${uuid}: ${error.message}`);
         }
         return data;
-        // return data.length > 0 ? data[0] : null;
+       
     }
     
 
   //hardcore delete
     static async delete(uuid) {
-        const temp = await Customer.findByUUID(uuid);
-        if (!temp) {
+        if (!uuid) {
+            throw new Error("Customer UUID is required");
+        }
+        const { data: customer, error: fetchError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('uuid', uuid)
+        .maybeSingle(); // reading to check existence
+
+        if (fetchError) {
+            throw new Error(`Error fetching customer ${uuid}: ${fetchError.message}`);
+        }
+        if (!customer) {
             throw new Error(`Customer with UUID ${uuid} not found`);
         }
-        console.log({temp})
+
         const { data, error } = await supabase
             .from('customers')
             .delete()
             .eq('uuid', uuid)
-            .maybeSingle();
+            .select("*")
+            .single();
+            
         if (error) {
             throw new Error(`Error deleting customer with UUID ${uuid}: ${error.message}`);
         }
-        return {...temp, deleted_at: temp.updated_at }; 
+        return data;
     }   
-//works fine 9/01/2026  
-    static async softDelete(uuid) {
+    //works fine 9/01/2026  
+    static async softDeleteCustomer (uuid) {
         const now = new Date().toISOString();
         const { data, error } = await supabase
             .from('customers')
@@ -205,10 +234,10 @@ class Customer {
 
     static async findByPhone(mobile, landline) {
     // Build OR condition for both columns
-        let orCondition = [];
-        if (mobile) orCondition.push(`mobile_phone.eq.${mobile}`);
-        if (landline) orCondition.push(`landline_phone.eq.${landline}`);
-
+        const orCondition = [
+        mobile && `mobile_phone.eq.${mobile}`,
+        landline && `landline_phone.eq.${landline}`
+        ].filter(Boolean);
         if (orCondition.length === 0) return null;
 
         const { data, error } = await supabase
@@ -221,11 +250,10 @@ class Customer {
         if (!data) return null;
 
         // Determine which column matched
-        let matchedType = null;
-        if (mobile && data.mobile_phone === mobile) matchedType = 'mobile';
-        else if (landline && data.landline_phone === landline) matchedType = 'landline';
-
-        return { ...data, matchedType };
+        let matchedType = [];
+        if (mobile && data.mobile_phone === mobile) matchedType.push('mobile');
+        if (landline && data.landline_phone === landline) matchedType.push('landline');
+        return { data, matchedType };
 
     }   
 

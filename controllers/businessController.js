@@ -39,10 +39,10 @@ const createBusiness = async (req, res) => {
   if(!emailRegex.test(email)) return res.status(400).json({ error: 'Invalid email format' });
 
   if(!name){
-    return res.status(400).json({ error: 'Business name are required' });
+    return res.status(400).json({ error: 'Business name is required' });
   }
   if(!business_mobile_phone){
-    return res.status(400).json({ error: 'Business phone are required' });
+    return res.status(400).json({ error: 'Business phone is required' });
   }
 
   // ---- Normalize phones ----
@@ -54,19 +54,26 @@ const createBusiness = async (req, res) => {
     ? normalizeNZPhone(business_landline_phone)
     : null;
 
-
   if(!address){
-    return res.status(400).json({ error: 'Business address are required' });
+    return res.status(400).json({ error: 'Business address is required' });
   }
 
   let uuid;
   let exists;
   try {
-
     do {
       uuid = generateShortId(9);
       exists = await Business.findByUUID(uuid);
     } while (exists);
+
+    if (customer_uuid) {
+      const customer = await Customer.findByUUID(customer_uuid);
+      if (!customer) {
+        return res.status(404).json({ error: 'Customer not found' });
+      }
+      const linkedBusiness = await Customer.findByUUIDAndUpdate(customer_uuid, { customer_type:"business" });
+      console.log({ linkedBusiness });
+    }
 
     const newBusinessData = {
       uuid,
@@ -80,17 +87,9 @@ const createBusiness = async (req, res) => {
 
     const newBusiness = await Business.create(newBusinessData);
 
-    if (customer_uuid) {
-      const customer = await Customer.findByUUID(customer_uuid);
-      if (!customer) {
-        return res.status(404).json({ error: 'Customer not found' });
-      }
-      // Update customer with business UUID
-      // await Customer.findByUUIDAndUpdate(customer_uuid, { business_uuid: uuid });
-    }
-
-    return res.status(201).json(newBusiness);
+    return res.status(201).json({message: 'Business created successfully', data: newBusiness});
   } catch (error) {
+    console.error('Error creating business:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -143,10 +142,18 @@ const updateBusinessByUUID = async (req, res) => {
 
 const softDeleteBusiness = async (req, res) => {
   const { uuid } = req.params;
+  if (!uuid) return res.status(400).json({ error: "Business UUID is required" });
   try {
+
+    const business = await Business.findByUUID(uuid);
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
     const deleted = await Business.softDelete(uuid);
-    if (!deleted) return res.status(404).json({ error: 'Business not found' });
-    return res.status(200).json(deleted);
+    console.info(`Business ${uuid} soft-deleted at ${new Date().toISOString()}`);
+
+    return res.status(200).json({ message: 'Business soft-deleted successfully', data: deleted });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -154,11 +161,18 @@ const softDeleteBusiness = async (req, res) => {
 
 const reinstateBusiness = async (req, res) => {
   const { uuid } = req.params;
+  if (!uuid) return res.status(400).json({ error: "Business UUID is required" });
   try {
-    const reinstated = await Business.reinstate(uuid);
-    if (!reinstated) return res.status(404).json({ error: 'Business not found' });
-    return res.status(200).json(reinstated);
+    const foundBusiness = await Business.findByUUID(uuid);
+    if (!foundBusiness) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+    const businessReinstated = await Business.reinstate(uuid);
+    console.info(`Business ${uuid} reinstated by user ${req.user?.id || 'unknown'} at ${new Date().toISOString()}`);
+
+    return res.status(200).json({ message: 'Business reinstated successfully', data: businessReinstated });
   } catch (error) {
+    console.error(`Error reinstating business ${uuid}:`, error);
     return res.status(500).json({ error: error.message });
   }
 };

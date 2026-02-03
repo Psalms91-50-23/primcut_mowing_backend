@@ -13,6 +13,9 @@ class Business {
 
   // Find by UUID
   static async findByUUID(uuid) {
+    if (!uuid) {
+      throw new Error('UUID is required to find a business');
+    }
     const { data, error } = await supabase
       .from('businesses')
       .select('*')
@@ -24,6 +27,9 @@ class Business {
 
 // Find by business name
 static async findByName(name) {
+  if (!name) {
+    throw new Error('Business name is required to find a business');
+  }
   const { data, error } = await supabase
     .from('businesses')
     .select('*')
@@ -36,6 +42,9 @@ static async findByName(name) {
 
   // Create a business
   static async create(business) {
+    if (!business) {
+      throw new Error('Business data is required to create a business');
+    }
     const { data, error } = await supabase
       .from('businesses')
       .insert([business])
@@ -46,11 +55,14 @@ static async findByName(name) {
   }
 
   static async findeByEmail(email) {
+    if (!email) {
+        throw new Error('Email is required to find a business');
+    }
     const { data, error } = await supabase
       .from('businesses')
       .select('*')
       .eq('email', email)
-      .maybeSingle();
+      .single();
     if (error) {
         throw new Error(`Error fetching business with email ${email}: ${error.message}`);
     }
@@ -59,6 +71,12 @@ static async findByName(name) {
 
   // Update business by UUID
   static async findByUUIDAndUpdate(uuid, updates) {
+    if (!uuid) {
+      throw new Error('UUID is required to update a business');
+    }
+    if (!updates) {
+      throw new Error('Update data is required to update a business');
+    }
     const { data, error } = await supabase
       .from('businesses')
       .update({ ...updates, updated_at: new Date().toISOString() })
@@ -71,9 +89,13 @@ static async findByName(name) {
 
   // Soft delete
   static async softDelete(uuid) {
+    if (!uuid) {
+      throw new Error('UUID is required to soft delete a business');
+    }
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('businesses')
-      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ deleted_at: now, updated_at: now, is_deleted: true })
       .eq('uuid', uuid)
       .single();
     if (error) throw new Error(`Error soft deleting business with UUID ${uuid}: ${error.message}`);
@@ -105,11 +127,11 @@ static async findByName(name) {
 
   static async findByPhone(phone) {
     const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('mobile_phone', phone)
-        .or(`landline_phone.eq.${phone}`)
-        .maybeSingle();
+      .from('customers')
+      .select('*')
+      .eq('mobile_phone', phone)
+      .or(`landline_phone.eq.${phone}`)
+      .maybeSingle();
     if (error) throw new Error(`Error fetching customer with phone ${phone}: ${error.message}`);
     return data;
   }

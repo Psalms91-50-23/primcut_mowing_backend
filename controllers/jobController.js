@@ -47,9 +47,14 @@ export const createJobFromQuote  = async (req, res) => {
             });
         }
 
-        if (quote.is_deleted || quote.is_expired) {
+        if (quote.is_deleted) {
             return res.status(400).json({
-                error: 'Quote is not valid for job creation'
+                error: 'Quote has been set to deleted at creation of job'
+            });
+        }
+        if (quote.is_expired) {
+            return res.status(400).json({
+                error: 'Quote has expired at creation of job'
             });
         }
 
@@ -65,15 +70,14 @@ export const createJobFromQuote  = async (req, res) => {
             exists = await Job.findByUUID(uuid);
         } while (exists);
 
-
         const job = await Job.createFromQuote({
             quote,
             uuid,
-            scheduled_at: req.body?.scheduled_at ?? null,
-            is_recurring: req.body?.is_recurring ?? false,
-            recurrence_interval: req.body?.recurrence_interval ?? null,
-            recurrence_frequency: req.body?.recurrence_frequency ?? null,
-            recurrence_end_date: req.body?.recurrence_end_date ?? null
+            scheduled_at: req.body?.scheduledAt ?? null,
+            is_recurring: req.body?.isRecurring ?? false,
+            recurrence_interval: req.body?.recurrenceInterval ?? null,
+            recurrence_frequency: req.body?.recurrenceFrequency ?? null,
+            recurrence_end_date: req.body?.recurrenceEndDate ?? null
         });
 
         return res.status(201).json(job);
@@ -139,4 +143,76 @@ export const softDeleteJobByUUID = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ error: error.message });
     }   
+}
+
+export const updateByUUID = async (req, res) => {
+    const { uuid } = req.params;
+    const updates = req.body;
+    const { recurrenceEndDate, recurrenceInterval, recurrenceFrequency, isRecurring, isDeleted, isCompleted, completedDate, deletedAt, status, services } = req.body;
+    if (!uuid) {
+        return res.status(400).json({ error: 'Missing job UUID' });
+    }
+    if (!updates || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'No updates provided' });
+    }
+
+    const jobObject = {};
+
+    // map only what is present
+    if ('scheduledAt' in updates) {
+    jobObject.scheduled_at = updates.scheduledAt
+        ? new Date(updates.scheduledAt).toISOString()
+        : null;
+    }
+
+    if ('recurrenceEndDate' in updates) {
+    jobObject.recurrence_end_date = updates.recurrenceEndDate
+        ? updates.recurrenceEndDate // DATE column → keep as string
+        : null;
+    }
+
+    if ('recurrenceInterval' in updates) {
+    jobObject.recurrence_interval = updates.recurrenceInterval;
+    }
+
+    if ('recurrenceFrequency' in updates) {
+    jobObject.recurrence_frequency = updates.recurrenceFrequency;
+    }
+
+    if ('isRecurring' in updates) {
+    jobObject.is_recurring = updates.isRecurring;
+    }
+
+    if ('status' in updates) {
+    jobObject.status = updates.status;
+    }
+
+    if ('services' in updates) {
+    jobObject.services = updates.services;
+    }
+
+    if ('isCompleted' in updates) {
+    jobObject.is_completed = updates.isCompleted;
+    jobObject.completed_date = updates.isCompleted
+        ? new Date().toISOString()
+        : null;
+    }
+
+    jobObject.updated_at = new Date().toISOString();
+
+    try {
+
+        const exists = await Job.findByUUID(uuid);
+        if (!exists) {
+            return res.status(404).json({ error: 'Job not found' });
+        }  
+
+        const job = await Job.updateByUUID(uuid, jobObject);
+        if (!job) {
+            return res.status(404).json({ error: 'Failed to update job' });
+        }
+        return res.status(200).json({data: job, message: 'Job updated successfully'});
+    } catch (err) {
+        return res.status(400).json({ error: err.message });
+    }
 }
