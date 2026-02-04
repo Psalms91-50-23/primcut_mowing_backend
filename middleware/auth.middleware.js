@@ -92,7 +92,8 @@ export async function requireAuth(req, res, next) {
   try {
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
-
+    console.log("refresh token", refreshToken);
+    console.log("access token", accessToken);
     if (!accessToken) {
       return res.status(401).json({ error: 'Missing access token' });
     }

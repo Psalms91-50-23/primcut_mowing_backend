@@ -533,7 +533,7 @@ export const getUserByEmail = async (req, res) => {
 //delete user from supabase by email
 export const deleteUserByEmail = async (req, res) => {
   const { email } = req.body;
-  console.log({ email })
+
   if (!email) {
     return res.status(400).json({ error: "Email is required" });
   }
@@ -573,9 +573,7 @@ export const login = async (req, res) => {
 
   try {
     // 0️⃣ Verify reCAPTCHA token with Google
-    const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY; // your secret key
-
-    console.log({recaptchaSecret})
+    const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY; 
 
     const recaptchaRes = await fetch(
       `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
@@ -585,7 +583,6 @@ export const login = async (req, res) => {
     );
     
     const recaptchaData = await recaptchaRes.json();
-    console.log({recaptchaData})
 
     if (recaptchaData.action && recaptchaData.action !== "login") {
       return res.status(400).json({ error: "reCAPTCHA action mismatch" });
@@ -646,6 +643,7 @@ export const login = async (req, res) => {
     // 5️⃣ Set cookies only on success
     res.cookie("accessToken", data.session.access_token, {
       httpOnly: true,
+      // secure: false, // only true in production
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24, // 1 day
@@ -654,6 +652,7 @@ export const login = async (req, res) => {
 
     res.cookie("refreshToken", data.session.refresh_token, {
       httpOnly: true,
+      // secure: false,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
@@ -715,20 +714,15 @@ export const logout = async (req, res) => {
     }
 
     // Clear your custom auth cookies
-    res.cookie("accessToken", "", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      expires: new Date(0),
-      path: "/",
-    });
-
-    res.cookie("refreshToken", "", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      expires: new Date(0),
-      path: "/",
+        // 2️⃣ Clear cookies
+    ["accessToken", "refreshToken"].forEach((cookieName) => {
+      res.cookie(cookieName, "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        expires: new Date(0),
+        path: "/",
+      });
     });
 
     return res.status(200).json({ message: "Logged out successfully" });
