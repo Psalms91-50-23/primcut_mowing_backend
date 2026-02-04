@@ -588,13 +588,13 @@ export const login = async (req, res) => {
       return res.status(400).json({ error: "reCAPTCHA action mismatch" });
     }
     // Minimal logging
-    console.log("reCAPTCHA v3 check:", {
-      action: recaptchaData.action,
-      score: recaptchaData.score,
-      success: recaptchaData.success,
-      hostname: recaptchaData.hostname,
-      timestamp: new Date().toISOString()
-    });
+    // console.log("reCAPTCHA v3 check:", {
+    //   action: recaptchaData.action,
+    //   score: recaptchaData.score,
+    //   success: recaptchaData.success,
+    //   hostname: recaptchaData.hostname,
+    //   timestamp: new Date().toISOString()
+    // });
 
     if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
       // Fail if score is low for v3

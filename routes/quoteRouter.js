@@ -39,16 +39,15 @@ router.get("/id/:id", getQuoteById);
 router.get('/api/quotes/public', publicRateLimit, viewQuoteByToken);
 
 // GET quote by UUID
-router.get("/uuid/:uuid", getQuoteByUUID);
-
+router.get("/uuid/:uuid", publicRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
 
 router.get("/verify/:uuid", verifyQuoteToken);
 
 // CREATE quote
-router.post("/", createQuote);
+router.post("/", publicRateLimit, createQuote);
 
 // UPDATE quote by UUID
-router.patch("/uuid/:uuid", updateQuoteByUUID);
+router.patch("/uuid/:uuid", publicRateLimit, requireAuth, requireRole(["owner", "admin","employee"]), updateQuoteByUUID);
 
 // update quote by uuid admin
 router.patch("/admin/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]),  updateQuoteByUUIDAdmin);
@@ -57,10 +56,10 @@ router.patch("/admin/uuid/:uuid", requireAuth, requireRole(["owner", "admin","em
 router.patch("/id/:id", updateQuoteById);
 
 // ACCEPT quote
-router.patch("/accept/uuid/:uuid", acceptQuote)
+router.patch("/accept/uuid/:uuid", publicRateLimit, acceptQuote)
 
 // REJECT quote
-router.patch("/reject/uuid/:uuid", rejectQuote)
+router.patch("/reject/uuid/:uuid", publicRateLimit, rejectQuote)
 
 // SOFT DELETE
 router.patch("/soft-delete/uuid/:uuid", softDeleteQuote);
