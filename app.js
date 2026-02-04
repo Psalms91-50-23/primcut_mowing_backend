@@ -21,7 +21,11 @@ import cookieParser from 'cookie-parser';
 
 
 const app = express();
-const allowedOrigins = [ `${process.env.FRONTEND_HAPPY_LAWNS}` || `${process.env.CLIENT_URL}`];
+const allowedOrigins = [
+  process.env.FRONTEND_HAPPY_LAWNS || process.env.FRONTEND_URL || "http://localhost:3000"
+];
+
+console.log("CORS allowed origins:", allowedOrigins);
 // const allowedOrigins = [
 //     `${process.env.CLIENT_URL}`,
 //     `${process.env.FRONTEND_URL}`
