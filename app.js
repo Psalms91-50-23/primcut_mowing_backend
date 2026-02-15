@@ -24,15 +24,16 @@ import session from "express-session";
 
 
 const app = express();
-// const allowedOrigins = [
-//   process.env.FRONTEND_HAPPY_LAWNS || process.env.FRONTEND_URL || "http://localhost:3000"
-// ];
-
-
+//productin
 const allowedOrigins = [
-    `${process.env.CLIENT_URL}`,
-    `${process.env.FRONTEND_URL}`
+  process.env.FRONTEND_HAPPY_LAWNS || process.env.FRONTEND_URL || "http://localhost:3000"
 ];
+
+//for developtment
+// const allowedOrigins = [
+//     `${process.env.CLIENT_URL}`,
+//     `${process.env.FRONTEND_URL}`
+// ];
 
 app.use(cookieParser());
 app.use(express.json());
