@@ -23,12 +23,12 @@ class Job {
   }
 
   // Create a job
-  static async createFromQuote({ quote, uuid, scheduled_at, is_recurring, recurrence_interval, recurrence_frequency, recurrence_end_date }) {
+  static async createFromQuote({ quote, uuid, scheduled_at, is_recurring, recurrence_interval, recurrence_frequency, recurrence_end_date, customer_uuid }) {
         const { data, error } = await supabase
             .from('jobs')
             .insert([{
                 uuid,
-                customer_uuid: quote.customer_uuid,
+                customer_uuid: customer_uuid,
                 quote_uuid: quote.uuid,
                 services: quote.services,          // JSON array ✔
                 total_amount: quote.total_amount,
@@ -72,7 +72,7 @@ class Job {
         return data;
     }
 
-    static async findOneByQuoteUUID(quote_uuid) {
+    static async findJobByQuoteUUID(quote_uuid) {
         const { data, error } = await supabase
             .from('jobs')
             .select('*')

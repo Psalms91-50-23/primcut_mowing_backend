@@ -2,6 +2,37 @@ import supabase from '../config/db.js';
 
 class Customer {
 
+    static async findAllWithDetailsPaginated({
+        page = 1,
+        pageSize = 20,
+    }) {
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+
+        const { data, error, count } = await supabase
+        .from("customers")
+        .select(`
+            *,
+            businesses (*),
+            quotes (*),
+            jobs (
+            *,
+            invoices (
+                *,
+                payments (*)
+            )
+            )
+        `, { count: "exact" })
+        .range(from, to)
+        .order("created_at", { ascending: false });
+
+        if (error) {
+        throw new Error(`Error fetching customers: ${error.message}`);
+        }
+
+        return { data, count };
+    }
+
     //works fine 9/01/2026  
     static async findAll({ includeBusiness = false, isDeleted } = {}) {
         let query;
@@ -313,15 +344,14 @@ class Customer {
                 )
             `)
             .eq("uuid", uuid)
+            .order('created_at', { ascending: false })
             .maybeSingle();
-            // .order('created_at', { ascending: true });
 
         const { data, error } = await query;
 
         if (error) {
             throw new Error(`Error fetching customers with details: ${error.message}`);
         }
-
         return data;
     }
 
@@ -344,7 +374,7 @@ class Customer {
                 )
             `, { count: 'exact' })
             .range(from, to)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false });
 
         if (error) throw new Error(`Error fetching customers: ${error.message}`);
 

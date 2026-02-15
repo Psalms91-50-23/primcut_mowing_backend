@@ -1,14 +1,14 @@
 import User from '../models/User.js';
 import Customer from '../models/Customer.js';
+import Employee from '../models/Employee.js';
 import jwt from 'jsonwebtoken';
-import { generateShortId, formatFullName } from '../util/util.js';
+import { generateShortId, formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
 import { supabase, supabaseNonAdmin } from '../config/db.js';
-import { verifyEmailLink } from "../lib/email/index.js"
+import { verifyEmailLink, sendInviteLink } from "../lib/email/index.js"
 import { verifyHuman } from "./verifyHumanController.js";
 import { createClient } from '@supabase/supabase-js'
 import fetch from "node-fetch"; // if not already imported
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const EMAIL_TOKEN_EXPIRES_IN = '10m';// 10 minutes for testing
 
 // Register new user
 export const registerUser = async (req, res) => {
@@ -990,7 +990,7 @@ export const resetPassword = async (req, res) => {
 //   }
 // };
 
-export const checkCookiesExists = (req, res) => {
+export const checkCookiesExists = async (req, res) => {
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
     console.log({accessToken}, {refreshToken}, " in check cookies function")
@@ -1002,3 +1002,211 @@ export const checkCookiesExists = (req, res) => {
 
   return res.status(200).json({ loggedIn: true });
 };
+
+//designed for admin or owner to send link to new employee
+// Designed for admin or owner to send link to new employee
+export const createUserEmptyEmployee = async (req, res) => {
+  const {
+    businessEmail,
+    employeeFirstName,
+    employeeLastName,
+    userRole,
+    employeeIrdNumber,
+    employeeBankAccount,
+    employeeTaxCode,
+    employeeEmergencyContactPhone,
+    employeeEmergencyFirstName,
+    employeeEmergencyLastName,
+    employeeDepartment,
+    employeeJobTitle,
+    employeeContract,
+    employeeHireDate,
+    createdByUserUUID,
+    employeeEmail,
+    employeeAddress,
+    employeeLandLine,
+    employeeMobile
+  } = req.body;
+
+  if (!businessEmail) {
+    return res.status(400).json({ message: "Email is required!" });
+  }
+
+  const normalizedEmail = businessEmail.trim().toLowerCase();
+  let newEmployee = null;
+
+  try {
+    // 1️⃣ Check internal DB
+    const userExists = await User.findByEmail(normalizedEmail);
+    if (userExists) {
+      return res.status(409).json({ message: "Email already exists in DB." });
+    }
+
+    // 2️⃣ Check Supabase auth
+    const { data: existingUsers } = await supabase.auth.admin.listUsers({ email: normalizedEmail });
+    if (existingUsers?.length) {
+      return res.status(409).json({ message: "Email already registered in Supabase." });
+    }
+
+    // 3️⃣ Generate unique internal UUID for User
+    let uuid, exists;
+    do {
+      uuid = generateShortId(9);
+      exists = await User.findByUUID(uuid);
+    } while (exists);
+
+    // 4️⃣ Create internal DB user
+    const finalRole = userRole ?? "employee";
+    const user = await User.create({
+      auth_user_id: null, // fill with admin auth ID if needed
+      email: normalizedEmail,
+      first_name: employeeFirstName?.toLowerCase() ?? "",
+      last_name: employeeLastName?.toLowerCase() ?? "",
+      role: finalRole,
+      uuid
+    });
+
+    // 5️⃣ Generate unique internal UUID for Employee
+    let employeeUuid, employeeExists;
+    do {
+      employeeUuid = generateShortId(9);
+      employeeExists = await Employee.findByUUID(employeeUuid);
+    } while (employeeExists);
+
+    const finalEmployeeContract = employeeContract ?? "casual";
+
+    // 6️⃣ Build Employee object
+    newEmployee = {
+      uuid: employeeUuid,
+      user_uuid: user.uuid,
+      business_email: normalizedEmail,
+      created_by_user_uuid: createdByUserUUID,
+      employee_first_name: employeeFirstName ?? "",
+      employee_last_name: employeeLastName ?? "",
+      employee_ird_number: employeeIrdNumber ?? "",
+      employee_mobile: employeeMobile ?? "",
+      employee_landline: employeeLandLine ?? "",
+      employee_tax_code: employeeTaxCode ?? "",
+      employee_job_title: employeeJobTitle ?? "",
+      employee_bank_account_number: employeeBankAccount ?? "",
+      employee_address: employeeAddress ?? "",
+      employee_email: employeeEmail ?? "",
+      employee_department: employeeDepartment ?? "",
+      employee_emergency_contact_first_name: employeeEmergencyFirstName ?? "",
+      employee_emergency_contact_last_name: employeeEmergencyLastName ?? "",
+      employee_emergency_contact_phone: employeeEmergencyContactPhone ?? "",
+      employee_contract: finalEmployeeContract,
+      employee_hire_date: employeeHireDate ?? null,
+      employee_termination_date: null,
+      is_deleted: false,
+      deleted_at: null,
+      deleted_by_user_uuid: null
+    };
+
+    // 7️⃣ Insert Employee into DB
+    const newEmployeeAdded = await Employee.create(newEmployee);
+    if (!newEmployeeAdded) {
+      return res.status(400).json({ message: "Failed to create a new employee." });
+    }
+
+    // 8️⃣ Generate Supabase invite link
+    const { data: supabaseData, error: supabaseError } =
+      await supabase.auth.admin.generateLink({
+        type: "invite",
+        email: normalizedEmail,
+        options: { redirectTo: `${process.env.FRONTEND_URL}/user/set-password` }
+      });
+
+    if (supabaseError) {
+      console.error("Supabase generateLink error:", supabaseError);
+      return res.status(500).json({ message: "Failed to generate invite link" });
+    }
+
+    const inviteLink = supabaseData.properties.action_link;
+
+    // 9️⃣ Send invite email
+    await sendInviteLink({
+      to: normalizedEmail,
+      firstName: employeeFirstName,
+      lastName: employeeLastName,
+      inviteLink,
+      expiryHours: 24
+    });
+
+    // 10️⃣ Respond to frontend
+    return res.status(200).json({
+      message: "User and employee created and invite sent successfully",
+      userUuid: user.uuid,
+      user,
+      employee: newEmployeeAdded
+    });
+
+  } catch (error) {
+    console.error("Error creating user:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// export const createUserEmptyEmployee = async (req, res) => {
+
+//   const { email, role } = req.body;
+//   let user = null;
+//   if(!email){
+//     return res.status(400).json({ message: "Email is required!"});
+//   }
+//   const normalizedEmail = email?.trim().toLowerCase();
+
+//   try {
+    
+//     const userExists = await User.findByEmail(normalizedEmail);
+//     if(userExists){
+//       return res.status().json({ message: "Email already exists."});
+//     }
+
+//     // ===== Check existing user =====
+//     const { data: existingUsers } = await supabase.auth.admin.listUsers({ email: normalizedEmail });
+//     if (existingUsers?.length) {
+//       return res.status(409).json({ error: "Email already registered" });
+//     }
+
+//     let uuid;
+//     let exists;
+//     do {
+//       uuid = generateShortId(9);
+//       exists = await User.findByUUID(uuid);
+//     } while (exists);
+
+//     user = await User.create({
+//       auth_user_id: authUser.id,
+//       email: authUser.email,
+//       first_name: firstName.toLowerCase(),
+//       last_name: lastName.toLowerCase(),
+//       role: finalRole,
+//       uuid: uuid,
+//       role: role? role : "customer"
+//     });
+
+//     const { data, error } = await supabase.auth.admin.generateLink({
+//       type: "invite",
+//       email: normalizedEmail,
+//       options: { redirectTo: `${CLIENT_URL}/set-password` }
+//     });
+
+//     const emailToken = jwt.sign(
+//       {
+//         user_uuid: user.uuid,
+//         auth_user_id: authUser.id,
+//         purpose: 'email_verification'
+//       },
+//       process.env.EMAIL_TOKEN_SECRET,
+//       { expiresIn: EMAIL_TOKEN_EXPIRES_IN }
+//     );
+
+//   } catch (error) {
+//     console.error(error);
+//     return res.status(500).json({
+//       error: "Internal server error"
+//     });
+//   }
+// }

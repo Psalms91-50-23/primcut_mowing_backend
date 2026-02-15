@@ -1,13 +1,92 @@
 import Employee from '../models/Employee.js';
 import User from '../models/User.js';
-import supabase from '../config/supabase.js';
+import supabase from '../config/db.js';
 import jwt from 'jsonwebtoken';
-import { generateShortId } from '../utils/utils.js';
-import { verifyEmailLink, formatFullName } from '../utils/email.js';
-import { EMAIL_TOKEN_EXPIRES_IN } from '../config/constants.js';
+import { generateShortId, normalizeNZPhone } from '../util/util.js';
+import { formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
+import { verifyEmailLink } from "../lib/email/index.js"
+
+const EmployeeFormType = {
+  jobTitle: "",
+  department: "",
+  bankAccount: "",
+  irdNumber: "",
+  taxCode: "",
+  emergencyFirstName: "",
+  emergencyLastName: "",
+  emergencyPhone: "",
+  hireDate: "",
+};
+
+export const createEmployeeLinkToUser = async (req, res) => {
+
+  const { user_uuid } = req.params;
+
+  const { 
+    jobTitle, 
+    department, 
+    bankAccount, 
+    irdNumber, 
+    taxCode,
+    emergencyFirstName,
+    emergencyLastName,
+    emergencyPhone,
+    hireDate
+   } = req.body;
+
+  if(!user_uuid){
+    return res.status(400).json({ message: "User uuid is required!"});
+  }
+
+  try {
+    
+    const user = await User.findByUUID(user_uuid);
+    if(!user){
+      return res.status(400).json({ message: `No User found with the uuid: ${user_uuid}`});
+    }
+    let uuid;
+    let exists;
+    do {
+      uuid = generateShortId(9);
+      exists = await User.findByUUID(uuid);
+    } while (exists);
+
+    const employeeObject = {
+      uuid,
+      user_uuid: user_uuid,
+      job_title: jobTitle ?? "",
+      department: department ?? "",
+      bank_account: bankAccount ?? "",
+      ird_number: irdNumber ?? "",
+      tax_code: taxCode ?? "",
+      emergency_first_name: emergencyFirstName ?? "",
+      emergency_last_name: emergencyLastName ?? "",
+      emergency_phone: emergencyPhone ? normalizeNZPhone(emergencyPhone) : "",
+      hire_date: hireDate ?? null,
+    }
+    
+    const newEmployee = await Employee.create(employeeObject);
+    if(!newEmployee){
+      return res.status(400).json({ error: "Failed to create a new employee."});
+    }
+
+    return res.stats(200).json({
+      message: "New Employee created successfully",
+      data: newEmployee
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      error: "Internal server error"
+    });
+  }
+
+}
 
 // Register a new employee
-export const registerEmployee = async (req, res) => {
+export const createEmployee  = async (req, res) => {
+
   const { jobTitle, bankAccount, irdNumber, taxcode, department, emergencyContactFirstName, emergencyContactLastName, emergencyContactPhone, userUUID, dateHired } = req.body;
 
   if (!userUUID) {

@@ -6,8 +6,7 @@ export async function requireAuth(req, res, next) {
   try {
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
-    console.log("refresh token", refreshToken);
-    console.log("access token", accessToken);
+
     if (!accessToken) {
       return res.status(401).json({ error: 'Missing access token' });
     }
@@ -20,7 +19,7 @@ export async function requireAuth(req, res, next) {
       // Token valid
       const { data, error } = await supabase.auth.getUser(accessToken);
       if (error || !data?.user) return res.status(401).json({ error: 'Invalid token' });
-      console.log("data in require auth", data.user);
+
       sessionUser = data.user;
     } else {
       // Token expired → refresh
@@ -33,7 +32,7 @@ export async function requireAuth(req, res, next) {
       if (refreshError || !refreshData?.session) {
         return res.status(401).json({ error: 'Refresh failed, please log in again' });
       }
-      console.log({refreshData}, {refreshError});
+
       // Update cookies
       res.cookie('accessToken', refreshData.session.access_token, {
         httpOnly: true,
@@ -57,7 +56,6 @@ export async function requireAuth(req, res, next) {
     // Attach local user
     const localUser = await User.findByAuthUserId(sessionUser.id);
     if (!localUser) return res.status(404).json({ error: 'User not found' });
-    console.log({localUser})
 
     req.user = {
       uuid: localUser.uuid,

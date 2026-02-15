@@ -2,6 +2,11 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
 import { requireRole } from '../middleware/role.middleware.js';
 import {
+  authRateLimit,
+  publicRateLimit,
+  authenticatedRateLimit
+} from '../middleware/rateLimit.middleware.js';
+import {
     // getUsers,
     getUserByUUID,
     registerUser,
@@ -18,7 +23,8 @@ import {
     logout,
     // sendPasswordResetEmail,
     getUserByEmail,
-    checkCookiesExists
+    checkCookiesExists,
+    createUserEmptyEmployee
 
 } from '../controllers/userController.js';
 
@@ -27,12 +33,15 @@ const router = express.Router();
 router.get('/test', requireAuth, (req, res) => {
   res.json({ ok: true, user: req.user });
 });
+
 router.get('/all', getUsers);
 router.get('/auth/me', requireAuth, getCurrentUser);
 // router.get('/auth/check', requireAuth, checkCookiesExists);
 router.get('/auth/check', checkCookiesExists);
-router.post('/auth/login', login);
+router.post('/auth/login', authRateLimit, login);
 router.post('/auth/logout', logout);
+
+router.post('/auth/create/employee', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]), createUserEmptyEmployee);
 // router.post("/reset-password", sendPasswordResetEmail);
 router.get('/uuid/:uuid', getUserByUUID);
 router.get('/email', getUserByEmail);

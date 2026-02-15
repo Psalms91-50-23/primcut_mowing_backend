@@ -177,6 +177,7 @@ const hardDeleteCustomer = async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 }
+
 //works fine 9/01/2025
 const softDeleteCustomer = async (req, res) => {
     const { uuid } = req.params;
@@ -207,6 +208,7 @@ const reinstateCustomer = async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 }
+
 //have to test this 14/01/2025
 const updateCustomerById = async (req, res) => {
     const { id } = req.params;

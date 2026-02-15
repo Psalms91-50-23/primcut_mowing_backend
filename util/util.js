@@ -5,26 +5,93 @@ const DEFAULT_LENGTH = 9;
 import jwt from 'jsonwebtoken';
 import QuoteAccessToken from '../models/QuoteAccessToken.js';
 import { RecaptchaEnterpriseServiceClient } from "@google-cloud/recaptcha-enterprise";
+import { sendQuoteToClient } from "../lib/email/index.js"
 const EMAIL_SECRET = process.env.EMAIL_SECRET || 'supersecret123';
 const EMAIL_TOKEN_EXPIRATION = '5m'; // 5 minutes for testing
 const PASSWORD_RESET_TOKEN = process.env.RESET_PASSWORD_TOKEN_SECRET || 'SuperSecretPasswordResetKey_!!!';
+export const EMAIL_TOKEN_EXPIRES_IN = '10m';// 10 minutes for testing
+const TOKEN_EXPIRY_DAYS = 3; // e.g., 7 days
+const COUNTRY_CODES = {
+  NZ: /^(\+64)(2\d{1,2}|[3-9]\d)\d{6,7}$/,       // New Zealand
+  US: /^(\+1)([2-9]\d{2})([2-9]\d{2})(\d{4})$/,  // United States
+  AU: /^(\+61)([2-478]\d)(\d{6,8})$/,            // Australia
+  UK: /^(\+44)(7\d{3}|\d{2,4})\d{6,8}$/,         // United Kingdom
+  // Add more countries as needed
+};
 
-export function normalizeNZPhone(phone) {
-    phone = phone.replace(/\D/g, "");
-
-    if (phone.startsWith("64")) phone = `+${phone}`;
-    else if (phone.startsWith("0")) phone = `+64${phone.substring(1)}`;
-    else phone = `+64${phone}`;
-
-    // Optional: basic NZ number validation (mobile or landline)
-    if (!/^(\+64)(2\d{1,2}|[3-9]\d)\d{6,7}$/.test(phone)) {
-        throw new Error("Invalid NZ phone number");
-    }
-
-    return phone;
+/**
+ * Helper to get country dialing code
+ * @param {string} country
+ * @returns {string}
+ */
+export const getCountryCode = (country) => {
+  switch (country) {
+    case "NZ": return "+64";
+    case "US": return "+1";
+    case "AU": return "+61";
+    case "UK": return "+44";
+    default: return "+64"; // fallback NZ
+  }
 }
 
-export function generateShortId(size = DEFAULT_LENGTH) {
+
+/**
+ * Normalize international phone numbers.
+ * @param {string} phone - The phone number as input (digits, with or without 0 or +)
+ * @param {string} defaultCountry - Country code string (NZ, US, AU, UK, etc.)
+ * @returns {string} normalized phone number with +<country code>
+ */
+
+export const normalizeNZPhone = (phone) => {
+  if (!phone?.trim()) return null;
+
+  phone = phone.replace(/\D/g, "");
+
+  // Short landlines missing leading 0
+  if (phone.length === 7 || (phone.length === 8 && /^[2-9]/.test(phone))) {
+    phone = "0" + phone;
+  }
+
+  return "+64" + (phone.startsWith("0") ? phone.slice(1) : phone);
+};
+
+export const obfuscateName = (name) => {
+  if (!name) return "";
+  return name.length <= 2 ? name[0] + "*" : name.slice(0, 2) + "*".repeat(name.length - 2);
+}
+
+export const obfuscateEmail = (email) => {
+  if (!email || !email.includes("@")) return "";
+
+  const [local, domain] = email.split("@");
+
+  if (local.length <= 2) {
+    return `${local[0] || "*"}***@${domain}`;
+  }
+
+  const visibleStart = local.slice(0, 2);
+  const visibleEnd = local.length > 4 ? local.slice(-1) : "";
+  const hiddenLength = local.length - visibleStart.length - visibleEnd.length;
+
+  return `${visibleStart}${"*".repeat(Math.max(hiddenLength, 3))}${visibleEnd}@${domain}`;
+}
+
+// export function normalizeNZPhone(phone) {
+//     phone = phone.replace(/\D/g, "");
+
+//     if (phone.startsWith("64")) phone = `+${phone}`;
+//     else if (phone.startsWith("0")) phone = `+64${phone.substring(1)}`;
+//     else phone = `+64${phone}`;
+
+//     // Optional: basic NZ number validation (mobile or landline)
+//     if (!/^(\+64)(2\d{1,2}|[3-9]\d)\d{6,7}$/.test(phone)) {
+//         throw new Error("Invalid NZ phone number");
+//     }
+
+//     return phone;
+// }
+
+export const generateShortId = (size = DEFAULT_LENGTH) => {
     let shortUUID = "";
     const bytes = crypto.randomBytes(size);
     for (let i = 0; i < size; i++) {
@@ -151,46 +218,120 @@ export const verifyRecaptcha = async (token, version) => {
   }
 };
 
+export function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
-// export const verifyRecaptcha = async (token, version = "v3") => {
-//   const secret =
-//     version === "v2"
-//       ? process.env.RECAPTCHA_V2_SECRET_KEY
-//       : process.env.RECAPTCHA_V3_SECRET_KEY;
+// export async function createQuoteAccessToken(quote) {
+//   await QuoteAccessToken.revokeAllForQuote(quote.uuid);
 
-//   const res = await fetch(
-//     "https://www.google.com/recaptcha/api/siteverify",
-//     {
-//       method: "POST",
-//       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-//       body: new URLSearchParams({
-//         secret,
-//         response: token,
-//       }),
-//     }
-//   );
+//   const rawToken = crypto.randomBytes(32).toString("hex");
+//   const token_hash = hashToken(rawToken);
 
-//   const data = await res.json();
+//   const expires_at = new Date();
+//   expires_at.setDate(expires_at.getDate() + TOKEN_EXPIRY_DAYS);
 
-//   if (!data.success) return false;
-//   console.log({data}, "inside verifyRecaptcha util")
-//   // Only v3 has score
-//   if (version === "v3" && data.score < 0.5) return false;
+//   let tokenUUID;
+//   let exists;
+//   do {
+//       tokenUUID = generateShortId(9);
+//       exists = await QuoteAccessToken.findByUUID(tokenUUID);
+//   } while (exists);
 
-//   return true;
-// };
-
-// export const verifyRecaptcha = async (token) => {
-//   const [assessment] = await client.createAssessment({
-//     parent: `projects/${process.env.GOOGLE_CLOUD_PROJECT}`,
-//     assessment: {
-//       event: {
-//         token,
-//         siteKey: process.env.RECAPTCHA_V3_SECRET_KEY,
-//       },
-//     },
+//   await QuoteAccessToken.create({
+//     quote_uuid: quote.uuid,
+//     token_hash,
+//     expires_at: expires_at.toISOString(),
+//     uuid: tokenUUID,
 //   });
 
-//   // Enterprise gives a score from 0-1, treat >=0.5 as human
-//   return assessment?.riskAnalysis?.score >= 0.5;
-// };
+//   const quoteViewLink = `${process.env.CLIENT_URL}/quotes/view/${quote.uuid}?token=${rawToken}`;
+
+//   // Build client email data with conditional fields
+//   const emailData = {
+//     quoteUUID: quote.uuid,
+//     name: formatFullName(quote.contact_first_name, quote.contact_last_name),
+//     total: quote.total_amount,
+//     subtotal: quote.subtotal_amount,
+//     gst: quote.gst_amount,
+//     services: quote.services,
+//     quoteLink: quoteViewLink,
+//     expiry: formatExpiry(expires_at),
+//   };
+
+//   if (quote.contact_mobile) emailData.mobile = quote.contact_mobile;
+//   if (quote.contact_landline) emailData.landline = quote.contact_landline;
+//   if (quote.message) emailData.message = quote.message;
+//   if (quote.contact_email) emailData.email = quote.contact_email;
+//   if (quote.images && quote.images.length > 0) emailData.images = quote.images;
+
+//   await sendQuoteToClient({
+//     to: quote.contact_email,
+//     subject: "Your Quote is Ready",
+//     data: emailData,
+//   });
+
+//   return rawToken;
+// }
+
+export async function createQuoteAccessToken(quote) {
+  // Revoke any previous tokens for this quote
+  await QuoteAccessToken.revokeAllForQuote(quote.uuid);
+
+  // Generate a new random token and hash it for storage
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const token_hash = hashToken(rawToken);
+
+  // Use the quote's expiry_end as token expiry
+  // This ensures the token expires exactly when the quote expires
+  const expires_at = new Date(quote.expiry_end);
+
+  // Generate a unique UUID for this token
+  let tokenUUID;
+  let exists;
+  do {
+    tokenUUID = generateShortId(9);
+    exists = await QuoteAccessToken.findByUUID(tokenUUID);
+  } while (exists);
+
+  // Save the token in the database
+  await QuoteAccessToken.create({
+    quote_uuid: quote.uuid,
+    token_hash,
+    expires_at: expires_at.toISOString(), // token expires with the quote
+    uuid: tokenUUID,
+  });
+
+  // Build the client view link
+  const quoteViewLink = `${process.env.CLIENT_URL}/quotes/view/${quote.uuid}?token=${rawToken}`;
+
+  // Build client email data
+  const emailData = {
+    quoteUUID: quote.uuid,
+    name: formatFullName(quote.contact_first_name, quote.contact_last_name),
+    total: quote.total_amount,
+    subtotal: quote.subtotal_amount,
+    gst: quote.gst_amount,
+    services: quote.services,
+    quoteLink: quoteViewLink,
+    expiry: formatExpiry(expires_at), // display human-readable expiry
+  };
+
+  // Include optional fields if present
+  if (quote.contact_mobile) emailData.mobile = quote.contact_mobile;
+  if (quote.contact_landline) emailData.landline = quote.contact_landline;
+  if (quote.message) emailData.message = quote.message;
+  if (quote.contact_email) emailData.email = quote.contact_email;
+  if (quote.images && quote.images.length > 0) emailData.images = quote.images;
+
+  // Send the email to the client
+  await sendQuoteToClient({
+    to: quote.contact_email,
+    subject: "Your Quote is Ready",
+    data: emailData,
+  });
+
+  // Return the raw token so you can send it in the frontend link
+  return rawToken;
+}
+

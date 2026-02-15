@@ -21,6 +21,7 @@ router.get('/:uuid', getRecurrenceByUUID);
 
 // Update status
 router.patch('/:uuid/complete', completeRecurrence);
+
 router.patch('/:uuid/missed', missRecurrence);
 
 // Delete recurrence

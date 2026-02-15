@@ -9,20 +9,17 @@ import fetch from "node-fetch";
 export const verifyRecaptchaV3 = async (req, res) => {
   try {
     const { token, action } = req.body;
-    console.log("Request body:", req.body);
     if (!token) {
       return res.status(400).json({ success: false, error: "reCAPTCHA token is required" });
     }
 
     const secret = process.env.RECAPTCHA_V3_SECRET_KEY;
-    console.log({secret},"secret v3")
     const response = await fetch(
       `https://www.google.com/recaptcha/api/siteverify?secret=${secret}&response=${token}`,
       { method: "POST" }
     );
 
     const data = await response.json();
-    console.log({data}," data in v3 captcha")
     // Optional: check action
     if (action && data.action !== action) {
       return res.status(400).json({ success: false, error: "reCAPTCHA action mismatch" });

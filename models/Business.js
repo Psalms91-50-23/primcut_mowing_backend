@@ -25,20 +25,20 @@ class Business {
     return data;
   }
 
-// Find by business name
-static async findByName(name) {
-  if (!name) {
-    throw new Error('Business name is required to find a business');
+  // Find by business name
+  static async findByName(name) {
+    if (!name) {
+      throw new Error('Business name is required to find a business');
+    }
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('*')
+      .ilike('name', name) 
+      .maybeSingle(); 
+      
+    if (error) throw new Error(`Error fetching business with name "${name}": ${error.message}`);
+    return data;
   }
-  const { data, error } = await supabase
-    .from('businesses')
-    .select('*')
-    .ilike('name', name) 
-    .maybeSingle(); 
-    
-  if (error) throw new Error(`Error fetching business with name "${name}": ${error.message}`);
-  return data;
-}
 
   // Create a business
   static async create(business) {

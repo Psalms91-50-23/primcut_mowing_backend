@@ -1,6 +1,82 @@
 import supabase from "../config/db.js";
 
 export default class Quote {
+    
+    static async findAllWithPagination({
+        page = 1,
+        limit = 10,
+        status,
+        olderThan = 7,
+    }) {
+        const pageNum = Math.max(Number(page) || 1, 1);
+        const limitNum = Math.min(Number(limit) || 10, 100);
+        const from = (pageNum - 1) * limitNum;
+        const to = from + limitNum - 1;
+
+        let query = supabase
+            .from("quotes")
+            .select(
+            `
+                *,
+                customer:customers (
+                uuid,
+                first_name,
+                last_name,
+                email
+                )
+            `,
+            { count: "exact" }
+            )
+            .range(from, to)
+            .order("created_at", { ascending: false });
+
+        // ------------------------
+        // STATUS FILTERS
+        // ------------------------
+        if (status === "draft") {
+            query = query.eq("status", "draft");
+        }
+
+        if (status === "sent") {
+            query = query.eq("status", "sent");
+        }
+
+        if (status === "accepted") {
+            query = query.eq("status", "accepted");
+        }
+
+        if (status === "rejected") {
+            query = query.eq("status", "rejected");
+        }
+
+        // ------------------------
+        // EXPIRED (DERIVED)
+        // ------------------------
+       if (status === "expired") {
+        const cutoffDate = new Date(
+            Date.now() - Number(olderThan) * 24 * 60 * 60 * 1000
+        ).toISOString();
+
+            query = query
+            .eq("status", "expired")      // ← check expired, not draft/sent
+            .lt("created_at", cutoffDate);
+        }
+
+        const { data, error, count } = await query;
+
+        if (error) {
+            throw new Error(`Error fetching quotes: ${error.message}`);
+        }
+
+        return {
+            quotes: data || [],
+            page: pageNum,
+            limit: limitNum,
+            total: count || 0,
+            totalPages: Math.ceil((count || 0) / limitNum),
+        };
+    }
+
     // Get all quotes
     static async findAll() {
         const { data, error } = await supabase
@@ -152,6 +228,7 @@ export default class Quote {
             console.info(`Quote ${uuid} hard-deleted at ${new Date().toISOString()}`);
         return data; 
     }
+    
     // Soft delete (set deleted_at)
     static async softDelete(uuid) {
         if (!uuid) {
@@ -190,19 +267,21 @@ export default class Quote {
             return data;
         }
 
-    static async acceptQuote(uuid) {
+    static async acceptQuote(uuid, customerUUID) {
         if (!uuid) {
             throw new Error("Quote UUID is required");
         }
+        const now = new Date().toISOString();
         const { data, error } = await supabase
         .from("quotes")
         .update({ 
             status: 'accepted', 
             is_active: false,
-            updated_at: new Date().toISOString()
+            updated_at: now,
+            responded_at: now,
+            customer_uuid: customerUUID
         })
         .eq("uuid", uuid)
-        .eq('status', 'pending')
         .eq('is_expired', false)
         .eq('is_deleted', false)
         .select("*")
@@ -213,12 +292,14 @@ export default class Quote {
     }
 
     static async rejectQuote(uuid) {
+        const now = new Date().toISOString();
         const { data, error } = await supabase
             .from("quotes")
-            .update({ status: 'rejected', updated_at: new Date().toISOString(), is_active: false })
+            .update({ status: 'rejected', updated_at: now, is_active: false, responded_at: now })
             .eq("uuid", uuid)
+            .eq('is_expired', false)
             .eq("is_deleted", false)
-                .select("*")
+            .select("*")
             .single();
 
         if (error) throw new Error(`Error rejecting quote: ${error.message}`);
@@ -278,9 +359,9 @@ export default class Quote {
             is_active: true,
             updated_at: updatedAt,
             })
-        .eq("uuid", uuid)
+            .eq("uuid", uuid)
             .select("*")
-        .single();
+            .single();
 
         if (error) throw new Error(`Error extending quote: ${error.message}`);
         return data;

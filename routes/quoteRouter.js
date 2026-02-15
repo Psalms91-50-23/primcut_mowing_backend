@@ -19,13 +19,14 @@ import {
     acceptQuote,
     rejectQuote,
     extendQuoteController,
-    updateQuoteByUUIDAdmin,
+    updateQuoteByUUIDEmployee,
     deleteAllFilesFromBucket,
-    verifyQuoteToken
+    getQuotes,
+    getLimitedQuoteByUUID
 } from "../controllers/quoteController.js";
 
 import {
-  viewQuoteByToken
+  viewPublicQuote
 } from "../controllers/quoteAccessTokenController.js"
 
 const router = express.Router();
@@ -36,30 +37,37 @@ router.get("/all", getAllQuotes);
 // GET quote by ID
 router.get("/id/:id", getQuoteById);
 
-router.get('/api/quotes/public', publicRateLimit, viewQuoteByToken);
+// GET quotes
+router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), getQuotes);
+
+// router.get('/api/quotes/public', viewPublicQuote);
 
 // GET quote by UUID
-router.get("/uuid/:uuid", publicRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
+router.get("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
 
-router.get("/verify/:uuid", verifyQuoteToken);
+// GET quote by UUID
+router.get("/customer/uuid/:uuid", getQuoteByUUID);
 
 // CREATE quote
-router.post("/", publicRateLimit, createQuote);
+router.post("/create", createQuote);
 
 // UPDATE quote by UUID
-router.patch("/uuid/:uuid", publicRateLimit, requireAuth, requireRole(["owner", "admin","employee"]), updateQuoteByUUID);
+router.patch("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]), updateQuoteByUUID);
 
 // update quote by uuid admin
-router.patch("/admin/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]),  updateQuoteByUUIDAdmin);
+router.patch("/admin/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]),  updateQuoteByUUIDEmployee);
 
 // UPDATE quote by ID
 router.patch("/id/:id", updateQuoteById);
 
 // ACCEPT quote
-router.patch("/accept/uuid/:uuid", publicRateLimit, acceptQuote)
+router.patch("/public/accept/uuid/:uuid", acceptQuote)
+
+//GET QUOTES BY LIMITED ROUTE 
+router.get("/public/limited/uuid/:uuid", getLimitedQuoteByUUID)
 
 // REJECT quote
-router.patch("/reject/uuid/:uuid", publicRateLimit, rejectQuote)
+router.patch("/public/reject/uuid/:uuid", rejectQuote)
 
 // SOFT DELETE
 router.patch("/soft-delete/uuid/:uuid", softDeleteQuote);

@@ -46,10 +46,16 @@ export function createRateLimit({ windowMs, max, keyGenerator }) {
   };
 }
 
+// Rate limit for auth endpoints (e.g., login, signup)
 export const authRateLimit = createRateLimit({
   windowMs: 60_000, // 1 minute
-  max: 10,
-  keyGenerator: (req) => `auth:${req.ip}`
+  max: 10, // max 10 requests per window
+  keyGenerator: (req) => `auth:${req.ip}`,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: "Too many authentication requests. Please wait a minute and try again.",
+    });
+  },
 });
 
 export const publicRateLimit = createRateLimit({
@@ -58,17 +64,26 @@ export const publicRateLimit = createRateLimit({
   keyGenerator: (req) => {
     const token = req.query.token || 'no-token';
     return `quote:${req.ip}:${token.slice(0, 8)}`;
-  }
+  },
+  handler: (req, res) => {
+    res.status(429).json({ error: 'Too many requests' }); // JSON response
+  },
 });
 
+// Rate limit for authenticated users (e.g., fetching data)
 export const authenticatedRateLimit = createRateLimit({
   windowMs: 60_000, // 1 minute
-  max: 120,
+  max: 120, // max 120 requests per window
   keyGenerator: (req) => {
-    // Prefer user ID if authenticated
-    if (req.user?.id) {
-      return `user:${req.user.id}`;
+        // Prefer Supabase auth_user_id if authenticated
+    if (req.user?.supabaseUser?.id) {
+      return `user:${req.user.supabaseUser.id}`;
     }
     return `ip:${req.ip}`;
-  }
+  },
+  handler: (req, res) => {
+    res.status(429).json({
+      error: "Rate limit exceeded. Please try again later."
+    });
+  },
 });
