@@ -1,4 +1,5 @@
 // Only load dotenv in development
+console.log("Railway env variables:", process.env);
 if (process.env.NODE_ENV !== "production") {
   import('dotenv').then(dotenv => dotenv.config());
 }
