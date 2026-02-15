@@ -151,8 +151,7 @@ export const viewPublicQuote = async (req, res) => {
 export const validateQuoteAccessToken = async (req, res) => {
   const { uuid } = req.params; // quote UUID
   const { token } = req.body;   // raw token from frontend
-  console.log({token})
-  console.log({uuid})
+
   console.log("validate quote token access as no cookies")
 
   if (!uuid || !token) {
@@ -181,7 +180,7 @@ export const validateQuoteAccessToken = async (req, res) => {
     if (quoteExpiry < now) {
       return res.status(401).json({ message: "Quote has expired" });
     }
-    console.log({tokenRecord});
+
     // Optional: revoke token if single-use
     // await tokenRecord.destroy();
 
@@ -209,7 +208,7 @@ export const validateQuoteAccessToken = async (req, res) => {
 };
 
 export const validateQuoteSession = async (req, res) => {
-  console.log("validate session")
+
   try {
     // Get the session cookie from headers
     const sessionToken = req.cookies?.quote_session;

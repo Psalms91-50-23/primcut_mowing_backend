@@ -18,8 +18,7 @@ class QuoteAccessToken {
             .from("quote_access_tokens")
             .select("*")
             .eq("token_hash", tokenHash)
-            .limit(1)
-            .single();
+            .maybeSingle(); // <- safer
 
         if (error) {
             throw new Error(`Error finding token: ${error.message}`);

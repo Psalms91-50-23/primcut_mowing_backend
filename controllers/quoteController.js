@@ -10,7 +10,7 @@ import {
 } from "../util/util.js";
 import { sendQuoteToBusiness, sendQuoteAccepted, sendQuoteRejected } from "../lib/email/index.js"; // adjust path
 import supabase from '../config/db.js';
-const MIN_EXPIRY_DAYS = 3;
+const MIN_EXPIRY_DAYS = 2;
 
 export const getLimitedQuoteByUUID = async (req, res) => {
 
@@ -387,7 +387,8 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
         expiry_end_date = new Date();
       }
 
-      // Check if expiry is at least 3 days from now
+      //min is 2 days
+      // Check if expiry is at least 2 days from now
       const minExpiryDate = new Date();
       minExpiryDate.setUTCDate(minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS);
       minExpiryDate.setUTCHours(23, 59, 59, 999);
