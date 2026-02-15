@@ -1,5 +1,5 @@
 // src/app.js
-import express from 'express';
+// import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
@@ -20,12 +20,6 @@ import verifyRecaptchaV2Router from './routes/verifyRecaptchaV2Router.js';
 
 // Middleware
 import { errorHandler } from './middleware/error.middleware.js';
-
-// ✅ Load dotenv only for development
-if (process.env.NODE_ENV !== "production") {
-  import('dotenv').then(dotenv => dotenv.config());
-}
-
 
 const app = express();
 console.log("NODE_ENV:", process.env.NODE_ENV);
