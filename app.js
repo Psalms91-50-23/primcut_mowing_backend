@@ -26,8 +26,10 @@ if (process.env.NODE_ENV !== "production") {
   import('dotenv').then(dotenv => dotenv.config());
 }
 
-const app = express();
 
+const app = express();
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("SESSION_SECRET:", process.env.SESSION_SECRET);
 // CORS setup
 const allowedOrigins = [
   process.env.FRONTEND_HAPPY_LAWNS || process.env.FRONTEND_URL || "http://localhost:3000"
