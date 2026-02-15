@@ -58,7 +58,8 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false, // ⚠️ IMPORTANT for localhost
+      secure: process.env.NODE_ENV === "production", // ✅ automatically true in prod
+      // secure: false, // ⚠️ IMPORTANT for localhost
       sameSite: "lax",
     },
   })
