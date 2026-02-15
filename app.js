@@ -1,4 +1,3 @@
-// src/app.js
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -22,12 +21,14 @@ import verifyRecaptchaV2Router from './routes/verifyRecaptchaV2Router.js';
 import { errorHandler } from './middleware/error.middleware.js';
 
 const app = express();
-console.log("NODE_ENV:", process.env.NODE_ENV);
-console.log("SESSION_SECRET:", process.env.SESSION_SECRET);
-// CORS setup
-const allowedOrigins = [
-  process.env.FRONTEND_HAPPY_LAWNS || process.env.FRONTEND_URL || "http://localhost:3000"
-];
+
+// Determine allowed CORS origins
+let allowedOrigins = [];
+if (process.env.NODE_ENV === "production") {
+  allowedOrigins.push(process.env.FRONTEND_HAPPY_LAWNS);
+} else {
+  allowedOrigins.push("http://localhost:3000");
+}
 //for developtment
 // const allowedOrigins = [
 //     `${process.env.CLIENT_URL}`,
@@ -38,18 +39,16 @@ console.log("CORS allowed origins:", allowedOrigins);
 app.use(cookieParser());
 app.use(express.json());
 
+// Enable CORS
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
 }));
+
+// Preflight support
 app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 
-// Session middleware (AFTER CORS, BEFORE routes)
-if (!process.env.SESSION_SECRET) {
-  console.error("❌ SESSION_SECRET is not defined!");
-  process.exit(1); // crash early to avoid silent 500s
-}
-
+// Session middleware
 app.use(
   session({
     name: "quote_session",
@@ -64,7 +63,7 @@ app.use(
   })
 );
 
-// Routers
+// Routes
 app.use('/api/customers', customerRouter);
 app.use('/api/businesses', businessRouter);
 app.use('/api/quotes', quoteRouter);
@@ -78,7 +77,7 @@ app.use('/api/password-reset', passwordResetRoutes);
 app.use('/api/verify-recaptcha-v3', verifyRecaptchaV3Router);
 app.use('/api/verify-recaptcha-v2', verifyRecaptchaV2Router);
 
-// Error handler (last)
+// Global error handler (last)
 app.use(errorHandler);
 
 export default app;
