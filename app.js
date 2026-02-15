@@ -34,7 +34,6 @@ if (process.env.NODE_ENV === "production") {
 //     `${process.env.CLIENT_URL}`,
 //     `${process.env.FRONTEND_URL}`
 // ];
-console.log("CORS allowed origins:", allowedOrigins);
 
 app.use(cookieParser());
 app.use(express.json());
