@@ -257,7 +257,7 @@ export const createQuote = async (req, res) => {
      // ===== ROLLBACK ACCESS TOKEN =====
     if (quoteAccessToken?.uuid) {
       try {
-        await QuoteAccessToken.hardDelete(quoteAccessToken.uuid);
+        await QuoteAccessToken.revokeToken(quoteAccessToken.uuid);
         console.log(`Rolled back quote access token ${quoteAccessToken.uuid}`);
       } catch (deleteTokenError) {
         console.error("Rollback token failed:", deleteTokenError);

@@ -109,6 +109,7 @@ class QuoteAccessToken {
 
     }
 
+    //hard delete
     static async revokeToken(tokenHash) {
         const { error } = await supabase
             .from("quote_access_tokens")

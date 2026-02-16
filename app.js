@@ -37,7 +37,7 @@ if (process.env.NODE_ENV === "production") {
 
 app.use(cookieParser());
 app.use(express.json());
-
+console.log({allowedOrigins})
 // Enable CORS
 app.use(cors({
   origin: allowedOrigins,
