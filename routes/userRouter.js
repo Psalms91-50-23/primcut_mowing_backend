@@ -40,7 +40,6 @@ router.get('/auth/me', requireAuth, getCurrentUser);
 router.get('/auth/check', checkCookiesExists);
 router.post('/auth/login', authRateLimit, login);
 router.post('/auth/logout', logout);
-
 router.post('/auth/create/employee', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]), createUserEmptyEmployee);
 // router.post("/reset-password", sendPasswordResetEmail);
 router.get('/uuid/:uuid', getUserByUUID);

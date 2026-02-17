@@ -8,12 +8,6 @@ import app from './app.js';
 
 const PORT = process.env.PORT || 4000;
 
-
-if (!process.env.SESSION_SECRET) {
-  console.error("❌ SESSION_SECRET is not defined! Crashing to prevent runtime errors.");
-  process.exit(1);
-}
-
 if (process.env.NODE_ENV === "production" && !process.env.FRONTEND_HAPPY_LAWNS) {
   console.error("❌ FRONTEND_HAPPY_LAWNS is not defined in production!");
   process.exit(1);

@@ -2,6 +2,9 @@ import User from '../models/User.js';
 import Customer from '../models/Customer.js';
 import Employee from '../models/Employee.js';
 import jwt from 'jsonwebtoken';
+import UserRefreshToken from '../models/UserRefreshToken .js';
+import UserAccessToken from '../models/UserAccessToken.js';
+import crypto from 'crypto';
 import { generateShortId, formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
 import { supabase, supabaseNonAdmin } from '../config/db.js';
 import { verifyEmailLink, sendInviteLink } from "../lib/email/index.js"
@@ -163,7 +166,7 @@ export const registerUser = async (req, res) => {
 
     if (rpcError) {
       // rollback local user
-      if (user?.uuid) await User.hardDeleteUserLocally(user.uuid);
+      if (user?.uuid) await User.hardDeleteLocalTable(user.uuid);
 
       throw new Error(rpcError.message);
     }
@@ -201,7 +204,7 @@ export const registerUser = async (req, res) => {
 
     if (user?.uuid) {
       try {
-        await User.hardDeleteUserLocally(user.uuid); // your delete function
+        await User.hardDeleteLocalTable(user.uuid); // your delete function
       } catch (cleanupErr) {
         console.error('FAILED TO ROLLBACK LOCAL USER', cleanupErr);
       }
@@ -209,6 +212,314 @@ export const registerUser = async (req, res) => {
 
     return res.status(400).json({ error: err.message });
   };
+};
+
+
+export const login = async (req, res) => {
+
+  const { email, password, recaptchaToken } = req.body;
+  console.log("Attempting login with:", { email, password });
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
+  if (!recaptchaToken) {
+    return res.status(400).json({ error: "reCAPTCHA token is missing" });
+  }
+
+  try {
+    // 0️⃣ Verify reCAPTCHA token with Google
+    const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY; 
+
+    const recaptchaRes = await fetch(
+      `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
+      { method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+       }
+    );
+    
+    const recaptchaData = await recaptchaRes.json();
+
+    if (recaptchaData.action && recaptchaData.action !== "login") {
+      return res.status(400).json({ error: "reCAPTCHA action mismatch" });
+    }
+
+    if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
+      // Fail if score is low for v3
+      return res.status(403).json({
+        error: "reCAPTCHA verification failed. Suspicious activity detected.",
+        recaptcha: recaptchaData,
+      });
+    }
+
+    // Sign in with Supabase
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.toLowerCase().trim(),
+      password,
+    });
+    console.log({data},{error}, " after sign in with password");
+    if (error) {
+      console.log("Supabase login error:", error);
+
+      if (error.code === "email_not_confirmed") {
+        return res.status(403).json({
+          error: "Please confirm your email before logging in",
+          code: "EMAIL_NOT_CONFIRMED",
+        });
+      }
+
+      return res.status(401).json({
+        error: error.message || "Invalid email or password",
+        code: error.code || "LOGIN_FAILED",
+      });
+    }
+
+    const authUser = data.user;
+    console.log({authUser});
+    // Fetch local user
+    let user = await User.findByAuthUserId(authUser.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Sync verification status
+    if (authUser.email_confirmed_at && !user.is_email_verified) {
+      await User.markVerified(authUser.id);
+      user = await User.findByAuthUserId(authUser.id);
+    }
+
+    //  Enforce email verification
+  // Enforce email verification on BOTH sides
+    if (!user.is_email_verified || !authUser.email_confirmed_at) {
+      return res.status(403).json({
+        error: "Email not verified",
+        code: "EMAIL_NOT_VERIFIED",
+      });
+    }
+
+     // ===== Generate Access Token =====
+    let accessUUID, existsAccess;
+    do {
+      accessUUID = generateShortId(9);
+      existsAccess = await UserAccessToken.findByUUID(accessUUID);
+    } while (existsAccess);
+
+    const accessTokenHash = crypto.randomBytes(32).toString("hex");
+    const accessToken = await UserAccessToken.create({
+      uuid: accessUUID,
+      user_uuid: user.uuid,
+      token_hash: accessTokenHash,
+      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24), // 1 day
+    });
+
+    // ===== Generate Refresh Token =====
+    let refreshUUID, existsRefresh;
+    do {
+      refreshUUID = generateShortId(9);
+      existsRefresh = await UserRefreshToken.findByUUID(refreshUUID);
+    } while (existsRefresh);
+
+    const refreshTokenHash = crypto.randomBytes(32).toString("hex");
+    const refreshToken = await UserRefreshToken.create({
+      uuid: refreshUUID,
+      user_uuid: user.uuid,
+      token_hash: refreshTokenHash,
+      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), // 7 days
+    });
+    
+    // ===== Set cookies =====
+    res.cookie("accessToken", accessToken.token_hash, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+      path: "/",
+    });
+
+    res.cookie("refreshToken", refreshToken.token_hash, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      path: "/",
+    });
+
+    const updatedUser = await User.updateByUUID(user.uuid, {
+      last_logged_in_at: new Date().toISOString(),
+    });
+
+    console.log(updatedUser, " in login function");
+    if (!updatedUser) {
+      return res.status(500).json({ error: "Failed to update last login time" });
+    }
+
+    return res.status(200).json({
+      message: "Login successful",
+      user: {
+        uuid: user.uuid,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        supabaseUser: {
+          id: authUser.id,
+          email: authUser.email,
+          email_confirmed_at: authUser.email_confirmed_at,
+          user_metadata: authUser.user_metadata,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    console.log("Logging out user");
+
+    const accessToken = req.cookies?.accessToken;
+    const refreshToken = req.cookies?.refreshToken;
+
+     // 1️⃣ Revoke tokens in your database
+    if (accessToken) {
+      try {
+        await UserAccessToken.revokeToken(accessToken);
+        console.log("Revoked access token in DB");
+      } catch (err) {
+        console.warn("Failed to revoke access token:", err.message);
+      }
+    }
+
+    if (refreshToken) {
+      try {
+        await UserRefreshToken.revokeToken(refreshToken);
+        console.log("Revoked refresh token in DB");
+      } catch (err) {
+        console.warn("Failed to revoke refresh token:", err.message);
+      }
+    }
+
+     // 2️⃣ Sign out from Supabase
+    if (accessToken) {
+      try {
+        const supabase = createClient(
+          process.env.SUPABASE_URL,
+          process.env.SUPABASE_ANON_KEY,
+          {
+            global: {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            },
+          }
+        );
+        await supabase.auth.signOut();
+        console.log("Supabase logout successful");
+      } catch (err) {
+        console.warn("Failed to logout from Supabase:", err.message);
+      }
+    }
+
+
+    // Clear your custom auth cookies
+        // 2️⃣ Clear cookies
+    ["accessToken", "refreshToken"].forEach((cookieName) => {
+      res.cookie(cookieName, "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        expires: new Date(0),
+        path: "/",
+      });
+    });
+
+    return res.status(200).json({ message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout error:", err);
+    return res.status(500).json({ error: "Failed to log out" });
+  }
+};
+
+// controllers/user.controller.js
+export const getCurrentUser = async (req, res) => {
+  try {
+    let accessToken = req.cookies.accessToken;
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!accessToken) {
+      return res.status(401).json({ error: "Missing access token" });
+    }
+
+    let sessionUser;
+
+    // 1️⃣ Decode token to check expiry
+    const decoded = jwt.decode(accessToken);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (decoded && decoded.exp > now) {
+      // Access token valid
+      const { data, error } = await supabase.auth.getUser(accessToken);
+      if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
+      sessionUser = data.user;
+    } else {
+      // Access token expired → refresh
+      if (!refreshToken) return res.status(401).json({ error: "Access token expired, please log in again" });
+
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+        refresh_token: refreshToken,
+      });
+
+      if (refreshError || !refreshData?.session) {
+        return res.status(401).json({ error: "Refresh failed, please log in again" });
+      }
+
+      // Update cookies with new tokens
+      accessToken = refreshData.session.access_token;
+      res.cookie("accessToken", refreshData.session.access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 1000 * 60 * 60 * 24, // 1 day
+        path: "/",
+      });
+
+      res.cookie("refreshToken", refreshData.session.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        path: "/",
+      });
+
+      sessionUser = refreshData.session.user;
+    }
+
+    // 2️⃣ Fetch local user from DB
+    const localUser = await User.findByAuthUserId(sessionUser.id);
+    if (!localUser) return res.status(404).json({ error: "User not found" });
+
+    // 3️⃣ Return user in same format as login
+    return res.status(200).json({
+      message: "Auto-login successful",
+      user: {
+        uuid: localUser.uuid,
+        email: localUser.email,
+        first_name: localUser.first_name,
+        last_name: localUser.last_name,
+        role: localUser.role,
+        supabaseUser: {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          email_confirmed_at: sessionUser.email_confirmed_at,
+          user_metadata: sessionUser.user_metadata,
+        },
+      },
+    });
+
+  } catch (err) {
+    console.error("getCurrentUser error:", err);
+    return res.status(500).json({ error: err.message });
+  }
 };
 
 export const verifyEmail = async (req, res) => {
@@ -370,8 +681,6 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
   }
 };
 
-
-
 // Mark user verified (app-specific approval)
 export const verifyUser = async (req, res) => {
   const { authUserId } = req.body;
@@ -460,12 +769,11 @@ export const hardDeleteFull = async (req, res) => {
       return res.status(400).json({ error: authError.message, message: "User deleted from local DB but failed to delete from Supabase Auth" });
     }
 
-    const deletedCustomer = await Customer.hardDeleteFull(customer.uuid);
+    const deletedCustomer = await Customer.hardDeleteFull(uuid);
     if (!deletedCustomer) {
       return res.status(500).json({ error: "Failed to hard delete customer from local DB" });
       }
     
-
     const deletedUser = await User.hardDeleteFull(uuid);
     if (!deletedUser) {
       return res.status(500).json({ error: "Failed to hard delete user from local DB" });
@@ -556,268 +864,6 @@ export const deleteUserByEmail = async (req, res) => {
 
     return res.status(200).json({ message: "User deleted successfully", data: temp });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-export const login = async (req, res) => {
-  const { email, password, recaptchaToken } = req.body;
-  console.log("Attempting login with:", { email, password });
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
-  }
-
-  if (!recaptchaToken) {
-    return res.status(400).json({ error: "reCAPTCHA token is missing" });
-  }
-
-  try {
-    // 0️⃣ Verify reCAPTCHA token with Google
-    const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY; 
-
-    const recaptchaRes = await fetch(
-      `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
-      { method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
-       }
-    );
-    
-    const recaptchaData = await recaptchaRes.json();
-
-    if (recaptchaData.action && recaptchaData.action !== "login") {
-      return res.status(400).json({ error: "reCAPTCHA action mismatch" });
-    }
-    // Minimal logging
-    // console.log("reCAPTCHA v3 check:", {
-    //   action: recaptchaData.action,
-    //   score: recaptchaData.score,
-    //   success: recaptchaData.success,
-    //   hostname: recaptchaData.hostname,
-    //   timestamp: new Date().toISOString()
-    // });
-
-    if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
-      // Fail if score is low for v3
-      return res.status(403).json({
-        error: "reCAPTCHA verification failed. Suspicious activity detected.",
-        recaptcha: recaptchaData,
-      });
-    }
-
-    // 1️⃣ Sign in with Supabase
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.toLowerCase().trim(),
-      password,
-    });
-    console.log({data},{error}, " after sign in with password");
-    if (error) {
-      console.log("Supabase login error:", error);
-
-      if (error.code === "email_not_confirmed") {
-        return res.status(403).json({
-          error: "Please confirm your email before logging in",
-          code: "EMAIL_NOT_CONFIRMED",
-        });
-      }
-
-      return res.status(401).json({
-        error: error.message || "Invalid email or password",
-        code: error.code || "LOGIN_FAILED",
-      });
-    }
-
-    const authUser = data.user;
-    console.log({authUser});
-    // 2️⃣ Fetch local user
-    let user = await User.findByAuthUserId(authUser.id);
-    if (!user) {
-      return res.status(404).json({ error: "User record not found" });
-    }
-
-    // 3️⃣ Sync verification status
-    if (authUser.email_confirmed_at && !user.is_email_verified) {
-      await User.markVerified(authUser.id);
-      user = await User.findByAuthUserId(authUser.id);
-    }
-
-    // 4️⃣ Enforce email verification
-    if (!user.is_email_verified) {
-      return res.status(403).json({
-        error: "Email not verified",
-        code: "EMAIL_NOT_VERIFIED",
-      });
-    }
-
-    // 5️⃣ Set cookies only on success
-    res.cookie("accessToken", data.session.access_token, {
-      httpOnly: true,
-      // secure: false, // only true in production
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 24, // 1 day
-      path: "/",
-    });
-
-    res.cookie("refreshToken", data.session.refresh_token, {
-      httpOnly: true,
-      // secure: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-      path: "/",
-    });
-
-    const updatedUser = await User.updateByUUID(user.uuid, {
-      last_logged_in_at: new Date().toISOString(),
-    });
-
-    console.log(updatedUser, " in login function");
-    if (!updatedUser) {
-      return res.status(500).json({ error: "Failed to update last login time" });
-    }
-
-    return res.status(200).json({
-      message: "Login successful",
-      user: {
-        uuid: user.uuid,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        role: user.role,
-        supabaseUser: {
-          id: authUser.id,
-          email: authUser.email,
-          email_confirmed_at: authUser.email_confirmed_at,
-          user_metadata: authUser.user_metadata,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    return res.status(500).json({ error: err.message || "Internal server error" });
-  }
-};
-
-export const logout = async (req, res) => {
-  try {
-    console.log("Logging out user");
-
-    const accessToken = req.cookies?.accessToken;
-
-    if (accessToken) {
-      const supabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          },
-        }
-      );
-      console.log("before sign out")
-      // Supabase logout (invalidates session)
-      await supabase.auth.signOut();
-    }
-
-    // Clear your custom auth cookies
-        // 2️⃣ Clear cookies
-    ["accessToken", "refreshToken"].forEach((cookieName) => {
-      res.cookie(cookieName, "", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        expires: new Date(0),
-        path: "/",
-      });
-    });
-
-    return res.status(200).json({ message: "Logged out successfully" });
-  } catch (err) {
-    console.error("Logout error:", err);
-    return res.status(500).json({ error: "Failed to log out" });
-  }
-};
-
-// controllers/user.controller.js
-export const getCurrentUser = async (req, res) => {
-  try {
-    let accessToken = req.cookies.accessToken;
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!accessToken) {
-      return res.status(401).json({ error: "Missing access token" });
-    }
-
-    let sessionUser;
-
-    // 1️⃣ Decode token to check expiry
-    const decoded = jwt.decode(accessToken);
-    const now = Math.floor(Date.now() / 1000);
-
-    if (decoded && decoded.exp > now) {
-      // Access token valid
-      const { data, error } = await supabase.auth.getUser(accessToken);
-      if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
-      sessionUser = data.user;
-    } else {
-      // Access token expired → refresh
-      if (!refreshToken) return res.status(401).json({ error: "Access token expired, please log in again" });
-
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
-        refresh_token: refreshToken,
-      });
-
-      if (refreshError || !refreshData?.session) {
-        return res.status(401).json({ error: "Refresh failed, please log in again" });
-      }
-
-      // Update cookies with new tokens
-      accessToken = refreshData.session.access_token;
-      res.cookie("accessToken", refreshData.session.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 1000 * 60 * 60 * 24, // 1 day
-        path: "/",
-      });
-
-      res.cookie("refreshToken", refreshData.session.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        path: "/",
-      });
-
-      sessionUser = refreshData.session.user;
-    }
-
-    // 2️⃣ Fetch local user from DB
-    const localUser = await User.findByAuthUserId(sessionUser.id);
-    if (!localUser) return res.status(404).json({ error: "User not found" });
-
-    // 3️⃣ Return user in same format as login
-    return res.status(200).json({
-      message: "Auto-login successful",
-      user: {
-        uuid: localUser.uuid,
-        email: localUser.email,
-        first_name: localUser.first_name,
-        last_name: localUser.last_name,
-        role: localUser.role,
-        supabaseUser: {
-          id: sessionUser.id,
-          email: sessionUser.email,
-          email_confirmed_at: sessionUser.email_confirmed_at,
-          user_metadata: sessionUser.user_metadata,
-        },
-      },
-    });
-
-  } catch (err) {
-    console.error("getCurrentUser error:", err);
     return res.status(500).json({ error: err.message });
   }
 };

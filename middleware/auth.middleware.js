@@ -13,14 +13,14 @@ export async function requireAuth(req, res, next) {
 
     const decoded = jwt.decode(accessToken);
     const now = Math.floor(Date.now() / 1000); // seconds
-    let sessionUser;
+    let supabaseUser;
 
     if (decoded && decoded.exp > now) {
       // Token valid
       const { data, error } = await supabase.auth.getUser(accessToken);
       if (error || !data?.user) return res.status(401).json({ error: 'Invalid token' });
 
-      sessionUser = data.user;
+      supabaseUser = data.user;
     } else {
       // Token expired → refresh
       if (!refreshToken) return res.status(401).json({ error: 'Access token expired, please log in again' });
@@ -50,11 +50,11 @@ export async function requireAuth(req, res, next) {
         path: "/",
       });
 
-      sessionUser = refreshData.session.user;
+      supabaseUser = refreshData.session.user;
     }
 
     // Attach local user
-    const localUser = await User.findByAuthUserId(sessionUser.id);
+    const localUser = await User.findByAuthUserId(supabaseUser.id);
     if (!localUser) return res.status(404).json({ error: 'User not found' });
 
     req.user = {
@@ -64,10 +64,10 @@ export async function requireAuth(req, res, next) {
       last_name: localUser.last_name,
       role: localUser.role,
       supabaseUser: {
-        id: sessionUser.id,
-        email: sessionUser.email,
-        email_confirmed_at: sessionUser.email_confirmed_at,
-        user_metadata: sessionUser.user_metadata
+        id: supabaseUser.id,
+        email: supabaseUser.email,
+        email_confirmed_at: supabaseUser.email_confirmed_at,
+        user_metadata: supabaseUser.user_metadata
       }
     };
 

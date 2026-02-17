@@ -47,21 +47,6 @@ app.use(cors({
 // Preflight support
 app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 
-// Session middleware
-app.use(
-  session({
-    name: "quote_session",
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-    },
-  })
-);
-
 // Routes
 app.use('/api/customers', customerRouter);
 app.use('/api/businesses', businessRouter);
