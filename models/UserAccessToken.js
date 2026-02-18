@@ -3,19 +3,17 @@ import crypto from 'crypto';
 
 class UserAccessToken {
 
-  static async create({ user_uuid, expires_at, ip_address, user_agent }) {
-    const token = crypto.randomBytes(32).toString('hex');
-    const token_hash = crypto.createHash('sha256').update(token).digest('hex');
+  static async create({ uuid, user_uuid, token_hash, expires_at, ip_address, user_agent }) {
 
     const { data, error } = await supabase
       .from('user_access_tokens')
-      .insert([{ user_uuid, token_hash, expires_at, ip_address, user_agent }])
+      .insert([{ uuid, user_uuid, token_hash, expires_at, ip_address, user_agent }])
       .select('*')
-      .single();
+      .maybeSingle();
 
     if (error) throw new Error(`Error creating user access token: ${error.message}`);
 
-    return { ...data, token }; // return the plain token to client
+    return { data }; // return the plain token to client
   }
 
   static async findByTokenHash(token) {
@@ -51,6 +49,18 @@ class UserAccessToken {
 
     if (error) throw new Error(`Error deleting expired tokens: ${error.message}`);
   }
+
+    static async findByUUID(uuid) {
+        const { data, error } = await supabase
+            .from("user_access_tokens")
+            .select("*")
+            .eq("uuid", uuid)
+            .limit(1)
+            .maybeSingle();
+
+        if (error) throw new Error(`Error finding token UUID: ${error.message}`);
+        return data;
+    }
 
 }
 

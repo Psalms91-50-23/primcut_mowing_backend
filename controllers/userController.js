@@ -1,11 +1,12 @@
 import User from '../models/User.js';
 import Customer from '../models/Customer.js';
 import Employee from '../models/Employee.js';
+import UserLogin from '../models/UserLogin.js';
 import jwt from 'jsonwebtoken';
 import UserRefreshToken from '../models/UserRefreshToken .js';
 import UserAccessToken from '../models/UserAccessToken.js';
 import crypto from 'crypto';
-import { generateShortId, formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
+import { generateShortId, formatFullName, EMAIL_TOKEN_EXPIRES_IN, getClientIp } from '../util/util.js';
 import { supabase, supabaseNonAdmin } from '../config/db.js';
 import { verifyEmailLink, sendInviteLink } from "../lib/email/index.js"
 import { verifyHuman } from "./verifyHumanController.js";
@@ -214,10 +215,11 @@ export const registerUser = async (req, res) => {
   };
 };
 
-
 export const login = async (req, res) => {
 
   const { email, password, recaptchaToken } = req.body;
+
+
   console.log("Attempting login with:", { email, password });
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
@@ -227,6 +229,10 @@ export const login = async (req, res) => {
     return res.status(400).json({ error: "reCAPTCHA token is missing" });
   }
 
+  const ipAddress = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || '';
+  console.log({ipAddress})
+  console.log({userAgent})
   try {
     // 0️⃣ Verify reCAPTCHA token with Google
     const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY; 
@@ -277,74 +283,60 @@ export const login = async (req, res) => {
     const authUser = data.user;
     console.log({authUser});
     // Fetch local user
-    let user = await User.findByAuthUserId(authUser.id);
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
+    let localUser = await User.findByAuthUserId(authUser.id);
+    if (!localUser) {
+      return res.status(404).json({ error: "User record not found" });
     }
 
     // Sync verification status
-    if (authUser.email_confirmed_at && !user.is_email_verified) {
+    if (authUser.email_confirmed_at && !localUser.is_email_verified) {
       await User.markVerified(authUser.id);
-      user = await User.findByAuthUserId(authUser.id);
+      localUser = await User.findByAuthUserId(authUser.id);
     }
 
     //  Enforce email verification
-  // Enforce email verification on BOTH sides
-    if (!user.is_email_verified || !authUser.email_confirmed_at) {
+   // Enforce email verification on BOTH sides
+    if (!localUser.is_email_verified || !authUser.email_confirmed_at) {
       return res.status(403).json({
         error: "Email not verified",
         code: "EMAIL_NOT_VERIFIED",
       });
     }
 
-     // ===== Generate Access Token =====
-    let accessUUID, existsAccess;
+    let loginUUID;
+    let exists;
     do {
-      accessUUID = generateShortId(9);
-      existsAccess = await UserAccessToken.findByUUID(accessUUID);
-    } while (existsAccess);
+      loginUUID = generateShortId(9);
+      exists = await UserLogin.findByUUID(loginUUID);
+    } while (exists);
 
-    const accessTokenHash = crypto.randomBytes(32).toString("hex");
-    const accessToken = await UserAccessToken.create({
-      uuid: accessUUID,
-      user_uuid: user.uuid,
-      token_hash: accessTokenHash,
-      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24), // 1 day
+    await UserLogin.create({
+      uuid: loginUUID,
+      user_uuid: localUser.uuid,
+      ip_address: ipAddress,
+      user_agent: userAgent,
+      success: true,
     });
-
-    // ===== Generate Refresh Token =====
-    let refreshUUID, existsRefresh;
-    do {
-      refreshUUID = generateShortId(9);
-      existsRefresh = await UserRefreshToken.findByUUID(refreshUUID);
-    } while (existsRefresh);
-
-    const refreshTokenHash = crypto.randomBytes(32).toString("hex");
-    const refreshToken = await UserRefreshToken.create({
-      uuid: refreshUUID,
-      user_uuid: user.uuid,
-      token_hash: refreshTokenHash,
-      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), // 7 days
-    });
-    
     // ===== Set cookies =====
-    res.cookie("accessToken", accessToken.token_hash, {
+    res.cookie("accessToken", data.session.access_token, {
       httpOnly: true,
+      // secure: false,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24, // 1 day
       path: "/",
     });
 
-    res.cookie("refreshToken", refreshToken.token_hash, {
+    res.cookie("refreshToken", data.session.refresh_token, {
       httpOnly: true,
+      // secure: false,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
       path: "/",
     });
 
-    const updatedUser = await User.updateByUUID(user.uuid, {
+    const updatedUser = await User.updateByUUID(localUser.uuid, {
       last_logged_in_at: new Date().toISOString(),
     });
 
@@ -356,11 +348,11 @@ export const login = async (req, res) => {
     return res.status(200).json({
       message: "Login successful",
       user: {
-        uuid: user.uuid,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        role: user.role,
+        uuid: localUser.uuid,
+        email: localUser.email,
+        first_name: localUser.first_name,
+        last_name: localUser.last_name,
+        role: localUser.role,
         supabaseUser: {
           id: authUser.id,
           email: authUser.email,
@@ -375,62 +367,89 @@ export const login = async (req, res) => {
   }
 };
 
+
+// export const logout = async (req, res) => {
+//   try {
+//     console.log("Logging out user");
+
+//     const accessToken = req.cookies?.accessToken;
+//     // const refreshToken = req.cookies?.refreshToken;
+
+//      // 2️⃣ Sign out from Supabase
+//     if (accessToken) {
+//       try {
+//         const supabase = createClient(
+//           process.env.SUPABASE_URL,
+//           process.env.SUPABASE_ANON_KEY,
+//           {
+//             global: {
+//               headers: { Authorization: `Bearer ${accessToken}` },
+//             },
+//           }
+//         );
+//         await supabase.auth.signOut();
+//         console.log("Supabase logout successful");
+//       } catch (err) {
+//         console.warn("Failed to logout from Supabase:", err.message);
+//       }
+//     }
+
+//     // Clear your custom auth cookies
+//         // 2️⃣ Clear cookies
+//     ["accessToken", "refreshToken"].forEach((cookieName) => {
+//       res.cookie(cookieName, "", {
+//         httpOnly: true,
+//         secure: process.env.NODE_ENV === "production",
+//         sameSite: "lax",
+//         expires: new Date(0),
+//         path: "/",
+//       });
+//     });
+
+//     return res.status(200).json({ message: "Logged out successfully" });
+//   } catch (err) {
+//     console.error("Logout error:", err);
+//     return res.status(500).json({ error: "Failed to log out" });
+//   }
+// };
 export const logout = async (req, res) => {
   try {
     console.log("Logging out user");
 
     const accessToken = req.cookies?.accessToken;
-    const refreshToken = req.cookies?.refreshToken;
 
-     // 1️⃣ Revoke tokens in your database
     if (accessToken) {
-      try {
-        await UserAccessToken.revokeToken(accessToken);
-        console.log("Revoked access token in DB");
-      } catch (err) {
-        console.warn("Failed to revoke access token:", err.message);
-      }
-    }
-
-    if (refreshToken) {
-      try {
-        await UserRefreshToken.revokeToken(refreshToken);
-        console.log("Revoked refresh token in DB");
-      } catch (err) {
-        console.warn("Failed to revoke refresh token:", err.message);
-      }
-    }
-
-     // 2️⃣ Sign out from Supabase
-    if (accessToken) {
-      try {
-        const supabase = createClient(
-          process.env.SUPABASE_URL,
-          process.env.SUPABASE_ANON_KEY,
-          {
-            global: {
-              headers: { Authorization: `Bearer ${accessToken}` },
+      const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
             },
-          }
-        );
-        await supabase.auth.signOut();
-        console.log("Supabase logout successful");
-      } catch (err) {
-        console.warn("Failed to logout from Supabase:", err.message);
-      }
+          },
+        }
+      );
+      console.log("before sign out")
+      // Supabase logout (invalidates session)
+      await supabase.auth.signOut();
     }
-
 
     // Clear your custom auth cookies
-        // 2️⃣ Clear cookies
-    ["accessToken", "refreshToken"].forEach((cookieName) => {
-      res.cookie(cookieName, "", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        expires: new Date(0),
-        path: "/",
-      });
+    res.cookie("accessToken", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      expires: new Date(0),
+      path: "/",
+    });
+
+    res.cookie("refreshToken", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      expires: new Date(0),
+      path: "/",
     });
 
     return res.status(200).json({ message: "Logged out successfully" });
@@ -440,29 +459,106 @@ export const logout = async (req, res) => {
   }
 };
 
-// controllers/user.controller.js
-export const getCurrentUser = async (req, res) => {
-  try {
-    let accessToken = req.cookies.accessToken;
-    const refreshToken = req.cookies.refreshToken;
 
+// export const getCurrentUser = async (req, res) => {
+//   try {
+//     const accessToken = req.cookies.accessToken;
+//     const refreshToken = req.cookies.refreshToken;
+
+//     if (!accessToken) {
+//       return res.status(401).json({ error: "Missing access token" });
+//     }
+
+//     let sessionUser;
+
+//     // 1️⃣ Decode token to check expiry
+//     const decoded = jwt.decode(accessToken);
+//     const now = Math.floor(Date.now() / 1000);
+
+//     if (decoded && decoded.exp > now) {
+//       // Access token valid
+//       const { data, error } = await supabase.auth.getUser(accessToken);
+//       if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
+//       sessionUser = data.user;
+//     } else {
+//       // Access token expired → refresh
+//       if (!refreshToken) return res.status(401).json({ error: "Access token expired, please log in again" });
+
+//       const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+//         refresh_token: refreshToken,
+//       });
+
+//       if (refreshError || !refreshData?.session) {
+//         return res.status(401).json({ error: "Refresh failed, please log in again" });
+//       }
+
+//       // Update cookies with new tokens
+//       accessToken = refreshData.session.access_token;
+//       res.cookie("accessToken", refreshData.session.access_token, {
+//         httpOnly: true,
+//         secure: process.env.NODE_ENV === "production",
+//         sameSite: "strict",
+//         maxAge: 1000 * 60 * 60 * 24, // 1 day
+//         path: "/",
+//       });
+
+//       res.cookie("refreshToken", refreshData.session.refresh_token, {
+//         httpOnly: true,
+//         secure: process.env.NODE_ENV === "production",
+//         sameSite: "strict",
+//         maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+//         path: "/",
+//       });
+
+//       sessionUser = refreshData.session.user;
+//     }
+
+//     // 2️⃣ Fetch local user from DB
+//     const localUser = await User.findByAuthUserId(sessionUser.id);
+//     if (!localUser) return res.status(404).json({ error: "User not found" });
+
+//     // 3️⃣ Return user in same format as login
+//     return res.status(200).json({
+//       message: "Auto-login successful",
+//       user: {
+//         uuid: localUser.uuid,
+//         email: localUser.email,
+//         first_name: localUser.first_name,
+//         last_name: localUser.last_name,
+//         role: localUser.role,
+//         supabaseUser: {
+//           id: sessionUser.id,
+//           email: sessionUser.email,
+//           email_confirmed_at: sessionUser.email_confirmed_at,
+//           user_metadata: sessionUser.user_metadata,
+//         },
+//       },
+//     });
+
+//   } catch (err) {
+//     console.error("getCurrentUser error:", err);
+//     return res.status(500).json({ error: err.message });
+//   }
+// };
+
+export const getCurrentUser = async (req, res) => {
+
+  try {
+    const accessToken = req.cookies.accessToken;
+    const refreshToken = req.cookies.refreshToken;
+    console.log({accessToken})
+    console.log({refreshToken})
     if (!accessToken) {
       return res.status(401).json({ error: "Missing access token" });
     }
 
     let sessionUser;
 
-    // 1️⃣ Decode token to check expiry
-    const decoded = jwt.decode(accessToken);
-    const now = Math.floor(Date.now() / 1000);
+    // Try fetching user via Supabase
+    const { data, error } = await supabase.auth.getUser(accessToken);
 
-    if (decoded && decoded.exp > now) {
-      // Access token valid
-      const { data, error } = await supabase.auth.getUser(accessToken);
-      if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
-      sessionUser = data.user;
-    } else {
-      // Access token expired → refresh
+    if (error || !data?.user) {
+      // Token may be expired → try refresh
       if (!refreshToken) return res.status(401).json({ error: "Access token expired, please log in again" });
 
       const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
@@ -474,31 +570,43 @@ export const getCurrentUser = async (req, res) => {
       }
 
       // Update cookies with new tokens
-      accessToken = refreshData.session.access_token;
       res.cookie("accessToken", refreshData.session.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        // sameSite: "strict",
+         sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+  path: "/",
         maxAge: 1000 * 60 * 60 * 24, // 1 day
         path: "/",
       });
-
       res.cookie("refreshToken", refreshData.session.refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        // sameSite: "strict",
+         sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+  path: "/",
         maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         path: "/",
       });
 
       sessionUser = refreshData.session.user;
+    } else {
+      sessionUser = data.user;
     }
 
-    // 2️⃣ Fetch local user from DB
-    const localUser = await User.findByAuthUserId(sessionUser.id);
-    if (!localUser) return res.status(404).json({ error: "User not found" });
+    // Fetch or create local user
+    let localUser = await User.findByAuthUserId(sessionUser.id);
+    if (!localUser) {
+      localUser = await User.create({
+        auth_user_id: sessionUser.id,
+        email: sessionUser.email,
+        first_name: sessionUser.user_metadata?.first_name || "",
+        last_name: sessionUser.user_metadata?.last_name || "",
+        role: "customer",
+        is_email_verified: !!sessionUser.email_confirmed_at,
+      });
+    }
 
-    // 3️⃣ Return user in same format as login
     return res.status(200).json({
       message: "Auto-login successful",
       user: {
@@ -515,12 +623,44 @@ export const getCurrentUser = async (req, res) => {
         },
       },
     });
-
   } catch (err) {
     console.error("getCurrentUser error:", err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || "Internal server error" });
   }
 };
+// export const getCurrentUser = async (req, res) => {
+//   try {
+//     const accessToken = req.cookies.accessToken;
+//     if (!accessToken) return res.status(401).json({ error: "Missing access token" });
+
+//     const hashedToken = crypto.createHash('sha256').update(accessToken).digest('hex');
+
+//     // 1️⃣ Look up access token in DB
+//     const tokenRecord = await UserAccessToken.findByTokenHash(hashedToken);
+//     if (!tokenRecord) return res.status(401).json({ error: "Invalid access token" });
+
+//     // 2️⃣ Check expiry
+//     if (new Date(tokenRecord.expires_at) < new Date()) return res.status(401).json({ error: "Token expired" });
+
+//     // 3️⃣ Fetch local user
+//     const user = await User.findByUUID(tokenRecord.user_uuid);
+//     if (!user) return res.status(404).json({ error: "User not found" });
+
+//     return res.status(200).json({
+//       message: "User fetched successfully",
+//       user: {
+//         uuid: user.uuid,
+//         email: user.email,
+//         first_name: user.first_name,
+//         last_name: user.last_name,
+//         role: user.role,
+//       },
+//     });
+//   } catch (err) {
+//     console.error("getCurrentUser error:", err);
+//     return res.status(500).json({ error: err.message });
+//   }
+// };
 
 export const verifyEmail = async (req, res) => {
   const token = req.body?.token || req.query?.token;
@@ -612,7 +752,7 @@ export const resendVerificationEmail = async (req, res) => {
 
     const verifyLink = `${process.env.CLIENT_URL}/verify?token=${emailToken}`;
 
-    await sendVerificationEmail({
+    await verifyEmailLink({
       to: user.email,
       name: formatFullName(user.first_name),
       verifyLink,

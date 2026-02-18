@@ -23,17 +23,17 @@ import { errorHandler } from './middleware/error.middleware.js';
 const app = express();
 
 // Determine allowed CORS origins
-let allowedOrigins = [];
-if (process.env.NODE_ENV === "production") {
-  allowedOrigins.push(process.env.FRONTEND_HAPPY_LAWNS);
-} else {
-  allowedOrigins.push("http://localhost:3000");
-}
+// let allowedOrigins = [];
+// if (process.env.NODE_ENV === "production") {
+//   allowedOrigins.push(process.env.FRONTEND_HAPPY_LAWNS);
+// } else {
+//   allowedOrigins.push("http://localhost:3000");
+// }
 //for developtment
-// const allowedOrigins = [
-//     `${process.env.CLIENT_URL}`,
-//     `${process.env.FRONTEND_URL}`
-// ];
+const allowedOrigins = [
+    `${process.env.CLIENT_URL}`,
+    `${process.env.FRONTEND_URL}`
+];
 
 app.use(cookieParser());
 app.use(express.json());

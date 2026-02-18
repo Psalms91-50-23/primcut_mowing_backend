@@ -14,7 +14,7 @@ class User {
     return data;
   }
 
-static async findAllIncludingDeleted() {
+  static async findAllIncludingDeleted() {
     const { data, error } = await supabase
       .from('users')
       .select('*')
@@ -38,7 +38,7 @@ static async findAllIncludingDeleted() {
     return data;
   }
 
-static async findByUUIDIncludingDeleted(uuid) {
+  static async findByUUIDIncludingDeleted(uuid) {
     const { data, error } = await supabase
       .from('users')
       .select('*')

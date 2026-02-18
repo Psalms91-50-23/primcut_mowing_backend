@@ -42,6 +42,17 @@ export const getCountryCode = (country) => {
  * @returns {string} normalized phone number with +<country code>
  */
 
+
+// Utility to get client IP
+export const getClientIp = (req) => {
+  const xForwardedFor = req.headers["x-forwarded-for"];
+  if (xForwardedFor) {
+    if (Array.isArray(xForwardedFor)) return xForwardedFor[0].split(",")[0].trim();
+    if (typeof xForwardedFor === "string") return xForwardedFor.split(",")[0].trim();
+  }
+  return req.socket.remoteAddress || "0.0.0.0";
+}
+
 export const normalizeNZPhone = (phone) => {
   if (!phone?.trim()) return null;
 
