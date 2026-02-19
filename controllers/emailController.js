@@ -27,13 +27,14 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 //     return res.status(500).json({ error: "Failed to send test email", details: error.message });
 //   }
 // };
+
 export const sendTestEmail = async (req, res) => {
   try {
     const { to } = req.body;
     const recipient = to || process.env.SEND_TO; // fallback to verified email
 
     console.log("Sending test email to:", recipient);
-    console.log("FRONTEND_HAPPY_LAWNS =", process.env.FRONTEND_HAPPY_LAWNS);
+    console.log("FRONTEND_HAPPY_LAWNS =", process.env.FRONTEND_URL_HAPPY_LAWNS);
 
     const response = await resend.emails.send({
       from: "onboarding@resend.dev",  // must be verified
@@ -41,7 +42,7 @@ export const sendTestEmail = async (req, res) => {
       subject: "Test Email from Happy Lawns Backend",
       text: "Hello! This is a test email from your backend using Resend.",
       html: `<p>Hello! This is a <strong>test email</strong> from your backend using Resend.</p>
-             <img src="https://${process.env.FRONTEND_HAPPY_LAWNS}/images/seedream-image.png" alt="Logo" width="64" />`,
+             <img src="https://${process.env.FRONTEND_URL_HAPPY_LAWNS}/images/seedream-image.png" alt="Logo" width="64" />`,
     });
 
     console.log("Test email sent:", response);
