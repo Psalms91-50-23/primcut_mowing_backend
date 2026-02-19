@@ -16,7 +16,7 @@ import employeeRouter from './routes/employeeRouter.js';
 import passwordResetRoutes from './routes/passwordResetTokenRouter.js';
 import verifyRecaptchaV3Router from './routes/verifyRecaptchaV3Router.js';
 import verifyRecaptchaV2Router from './routes/verifyRecaptchaV2Router.js';
-
+import emailRouter from "./routes/emailRouter.js"
 // Middleware
 import { errorHandler } from './middleware/error.middleware.js';
 
@@ -48,6 +48,7 @@ app.use(cors({
 app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 
 // Routes
+app.use("/api", emailRouter);
 app.use('/api/customers', customerRouter);
 app.use('/api/businesses', businessRouter);
 app.use('/api/quotes', quoteRouter);
