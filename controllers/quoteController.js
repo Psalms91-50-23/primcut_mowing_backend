@@ -5,10 +5,10 @@ import Job from "../models/Job.js";
 import crypto from "crypto";
 import {
   generateShortId, normalizeNZPhone,
-  formatExpiry, formatFullName, createQuoteAccessToken, hashToken, 
-  obfuscateName, obfuscateEmail
+  formatExpiry, formatFullName, dispatchQuoteToClient, hashToken, 
+  obfuscateName, obfuscateEmail, generateQuotePDF
 } from "../util/util.js";
-import { sendQuoteToBusiness, sendQuoteAccepted, sendQuoteRejected } from "../lib/email/index.js"; // adjust path
+import { sendQuoteToBusiness, sendQuoteAccepted, sendQuoteRejected, sendQuoteToClient } from "../lib/email/index.js"; // adjust path
 import supabase from '../config/db.js';
 const MIN_EXPIRY_DAYS = 2;
 
@@ -184,7 +184,7 @@ export const createQuote = async (req, res) => {
     const actionTokenHash = crypto.createHash("sha256").update(actionToken).digest("hex");
 
     const tokenExpiresAt = new Date();
-    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 3); 
+    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 2); 
 
     const newQuoteData = {
       uuid,
@@ -323,121 +323,623 @@ export const updateQuoteByUUID = async (req, res) => {
 };
 
 export const updateQuoteByUUIDEmployee = async (req, res) => {
-    const { uuid } = req.params;
-    if (!uuid) return res.status(400).json({ message: "Quote uuid is required" });
+  const { uuid } = req.params;
+
+  if (!uuid) {
+    return res.status(400).json({ message: "Quote uuid is required" });
+  }
+
+  let existingQuote;
+  let quoteSnapshot = null;
+  let filePath = null;
+
+  try {
+    // ==============================
+    // Fetch Existing Quote
+    // ==============================
+    existingQuote = await Quote.findByUUID(uuid);
+
+    if (!existingQuote) {
+      return res.status(404).json({
+        message: `Quote not found with uuid: ${uuid}`
+      });
+    }
+
+    quoteSnapshot = JSON.parse(JSON.stringify(existingQuote));
+
+    // State Guard
+    if (existingQuote.status !== "draft") {
+      return res.status(400).json({
+        message: "Quote cannot be dispatched in current state"
+      });
+    }
+
+    if (existingQuote.is_quote_sent_to_client) {
+      return res.status(400).json({
+        message: "Quote has already been sent to client"
+      });
+    }
+
+    // ==============================
+    // Extract Payload
+    // ==============================
+    const {
+      services,
+      subtotal_amount,
+      gst_amount,
+      total_amount,
+      preferred_contact_method,
+      contact_first_name,
+      contact_last_name,
+      contact_mobile,
+      contact_landline,
+      expiry_end,
+      sent_by_user_uuid,
+      employer_message
+    } = req.body;
+
+    const allowedContact = ["mobile", "landline", "email"];
+
+    if (
+      preferred_contact_method &&
+      !allowedContact.includes(preferred_contact_method)
+    ) {
+      return res.status(400).json({
+        message: "Invalid preferred contact method"
+      });
+    }
+
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({
+        message: "Services must be a non-empty array"
+      });
+    }
+
+    for (const s of services) {
+      if (typeof s.unit_price !== "number" || s.unit_price < 0) {
+        return res.status(400).json({
+          message: "Unit price must be a positive number"
+        });
+      }
+
+      if (typeof s.quantity !== "number" || s.quantity <= 0) {
+        return res.status(400).json({
+          message: "Quantity must be greater than zero"
+        });
+      }
+    }
+
+    // ==============================
+    // Totals Validation
+    // ==============================
+    const calcSubtotal = services.reduce(
+      (sum, s) => sum + s.unit_price * s.quantity,
+      0
+    );
+
+    const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+    const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+    if (calcSubtotal !== subtotal_amount) {
+      return res.status(400).json({ message: "Subtotal mismatch" });
+    }
+
+    if (calcGST !== gst_amount) {
+      return res.status(400).json({ message: "GST mismatch" });
+    }
+
+    if (calcTotal !== total_amount) {
+      return res.status(400).json({ message: "Total mismatch" });
+    }
+
+    // ==============================
+    // Expiry Handling
+    // ==============================
+    let expiry_end_date;
+
+    if (expiry_end) {
+      expiry_end_date = new Date(expiry_end);
+    } else {
+      expiry_end_date = new Date();
+    }
+
+    const minExpiryDate = new Date();
+    minExpiryDate.setUTCDate(
+      minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS
+    );
+    minExpiryDate.setUTCHours(23, 59, 59, 999);
+
+    if (expiry_end_date < minExpiryDate) {
+      expiry_end_date = minExpiryDate;
+    }
+
+    // ==============================
+    // Payload Preparation
+    // ==============================
+    const updatePayload = {
+      services,
+      subtotal_amount,
+      gst_amount,
+      total_amount,
+      expiry_end: expiry_end_date.toISOString(),
+      status: "sent",
+      is_quote_sent_to_client: true,
+      quote_sent_at: new Date().toISOString(),
+      sent_by_user_uuid: sent_by_user_uuid ?? null,
+      preferred_contact_method,
+      contact_mobile,
+      contact_landline,
+      contact_first_name,
+      contact_last_name,
+      employer_message: employer_message ?? "",
+      quote_pdf_url: null,
+      quote_pdf_version: (existingQuote.quote_pdf_version || 0) + 1,
+      quote_version_reason: "employee_sent"
+    };
+
+    // ==============================
+    // PDF Generation
+    // ==============================
+    filePath = `quotes-pdf/${uuid}/quote-${uuid}.pdf`;
+
+    const logoUrl = "https://happy-lawns.vercel.app/images/seedream-image.png";
+
+    let logoBuffer = null;
 
     try {
-      const {
-        services,
-        subtotal_amount,
-        gst_amount,
-        total_amount,
-        preferred_contact_method,
-        contact_first_name,
-        contact_last_name,
-        contact_mobile,
-        contact_landline,
-        status,
-        expiry_end,
-        sent_by_user_uuid
-      } = req.body;
-
-      // ===== Find quote =====
-      const quote = await Quote.findByUUID(uuid);
-      if (!quote)
-        return res.status(400).json({ message: `Failed to find quote with uuid: ${uuid}` });
-
-      // ===== Validate preferred contact =====
-      const allowedContact = ["mobile", "landline", "email"];
-      if (preferred_contact_method && !allowedContact.includes(preferred_contact_method)) {
-        return res.status(400).json({ message: "Invalid preferred contact method" });
-      }
-
-      // ===== Validate services =====
-      if (!Array.isArray(services) || services.length === 0)
-        return res.status(400).json({ message: "Services are required and must be a non-empty array" });
-
-      for (const s of services) {
-        if (typeof s.unit_price !== "number" || s.unit_price < 0)
-          return res.status(400).json({ message: "Unit price is required, must be a number, and cannot be negative" });
-        if (typeof s.quantity !== "number" || s.quantity <= 0)
-          return res.status(400).json({ message: "Quantity is required, must be a number, and must be greater than 0" });
-      }
-
-      // ===== Validate totals =====
-      const calcSubtotal = services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0);
-      const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
-      const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
-
-      if (calcSubtotal !== subtotal_amount) return res.status(400).json({ message: "Subtotal mismatch" });
-      if (calcGST !== gst_amount) return res.status(400).json({ message: "GST mismatch" });
-      if (calcTotal !== total_amount) return res.status(400).json({ message: "Total Amount mismatch" });
-
-      // ===== Parse expiry =====
-      let expiry_end_date;
-      console.log({expiry_end}, " backend admin update")
-      if (expiry_end) {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(expiry_end)) {
-          const [year, month, day] = expiry_end.split("-").map(Number);
-          expiry_end_date = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
-        } else {
-          expiry_end_date = new Date(expiry_end);
-        }
-      } else {
-        expiry_end_date = new Date();
-      }
-
-      //min is 2 days
-      // Check if expiry is at least 2 days from now
-      const minExpiryDate = new Date();
-      minExpiryDate.setUTCDate(minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS);
-      minExpiryDate.setUTCHours(23, 59, 59, 999);
-
-      if (expiry_end_date < minExpiryDate) {
-        // overwrite to 3 days from now if too soon
-        expiry_end_date = minExpiryDate;
-      }
-      // ===== Prepare updateData =====
-      const updateData = {
-        ...quote, // preserve existing fields
-        services,
-        subtotal_amount,
-        gst_amount,
-        total_amount,
-        expiry_end: expiry_end_date.toISOString(),
-        status: status ?? "sent",
-        is_quote_sent_to_client: true,
-        quote_sent_at: new Date().toISOString(),
-        sent_by_user_uuid: sent_by_user_uuid ?? null
-      };
-
-      // Optional contact updates
-      if (preferred_contact_method) updateData.preferred_contact_method = preferred_contact_method;
-      if (contact_mobile) updateData.contact_mobile = contact_mobile;
-      if (contact_landline) updateData.contact_landline = contact_landline;
-      if (contact_first_name) updateData.contact_first_name = contact_first_name;
-      if (contact_last_name) updateData.contact_last_name = contact_last_name;
-
-      // ===== Update quote =====
-      const updated = await Quote.updateByUUID(uuid, updateData);
-      if (!updated) return res.status(400).json({ message: `Failed to update quote with uuid: ${uuid}` });
-      console.log({expiry_end_date})
-      // ===== Create access token =====
-      let token;
-      try {
-        token = await createQuoteAccessToken(updated);
-  
-      } catch (emailError) {
-        console.error("Failed to send quote email:", emailError);
-      }
-
-      return res.status(200).json({ quote: updated });
-
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: error.message });
+      const response = await fetch(logoUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      logoBuffer = Buffer.from(arrayBuffer);
+    } catch (err) {
+      console.error("Logo load failed:", err.message);
     }
-  };
+    
+    const pdfBuffer = await generateQuotePDF({
+      ...existingQuote,
+      ...updatePayload,
+    }, null, logoBuffer);
+
+    const { error: uploadError } = await supabase.storage
+      .from("quotes-pdf")
+      .upload(filePath, pdfBuffer, {
+        contentType: "application/pdf",
+        upsert: true
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: publicData } = supabase.storage
+      .from("quotes-pdf")
+      .getPublicUrl(filePath);
+
+    const pdfUrl = publicData.publicUrl;
+    // ==============================
+    // Final Database Update
+    // ==============================
+    const finalQuote = await Quote.updateByUUID(uuid, {
+      ...updatePayload,
+      quote_pdf_url: pdfUrl
+    });
+   
+    await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const token_hash = hashToken(rawToken);
+
+    let tokenUUID;
+    let exists;
+    do {
+      tokenUUID = generateShortId(9);
+      exists = await QuoteAccessToken.findByUUID(tokenUUID);
+    } while (exists);
+
+    await QuoteAccessToken.create({
+      quote_uuid: finalQuote.uuid,
+      token_hash,
+      expires_at: new Date(finalQuote.expiry_end).toISOString(), // token expires with the quote
+      uuid: tokenUUID,
+    });
+
+    console.log({finalQuote})
+    const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
+    // ==============================
+    // Email Dispatch
+    // ==============================
+    await sendQuoteToClient({
+      to: finalQuote.contact_email,
+      subject: "Your Quote is Ready",
+      data: {
+        quoteUUID: finalQuote.uuid,
+        name: formatFullName(finalQuote.contact_first_name, finalQuote.contact_last_name),
+        mobile: finalQuote.contact_mobile ?? "",
+        landline: finalQuote.contact_landline ?? "",
+        message: finalQuote.message ?? "-",
+        email: finalQuote.contact_email,
+        subtotal: finalQuote.subtotal_amount,
+        gst: finalQuote.gst_amount,
+        total: finalQuote.total_amount,
+        services: finalQuote.services,
+        images: finalQuote.images,
+        quoteLink,
+        expiry: formatExpiry(finalQuote.expiry_end),
+        employer_message: employer_message ?? ""
+      },
+      pdfBuffer
+    });
+
+    return res.status(200).json({
+      message: "Quote updated and sent successfully",
+      quote: finalQuote
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    // ------------------------------
+    // Snapshot rollback
+    // ------------------------------
+    if (quoteSnapshot) {
+      try {
+        await Quote.updateByUUID(uuid, quoteSnapshot);
+      } catch (rollbackError) {
+        console.error("Database rollback failed:", rollbackError);
+      }
+    }
+        // ------------------------------
+    // Quote token rollback
+    // ------------------------------
+    try {
+      await QuoteAccessToken.revokeAllForQuote(uuid);
+    } catch (e) {
+      console.error("Token rollback failed:", e);
+    }
+    // ------------------------------
+    // Storage rollback
+    // ------------------------------
+    if (filePath) {
+      try {
+        await supabase.storage
+          .from("quotes-pdf")
+          .remove([filePath]);
+      } catch (storageError) {
+        console.error("Storage rollback failed:", storageError);
+      }
+    }
+
+    return res.status(500).json({
+      error: error.message || "Failed to finalize quote"
+    });
+  }
+};
+
+// export const updateQuoteByUUIDEmployee = async (req, res) => {
+//     const { uuid } = req.params;
+//     if (!uuid) return res.status(400).json({ message: "Quote uuid is required" });
+
+//     try {
+      
+//       // ===== Find quote =====
+//       const quote = await Quote.findByUUID(uuid);
+//       if (!quote)
+//         return res.status(400).json({message: `Failed to find quote with uuid: ${uuid}`});
+//        // ---------- State Guard ----------
+//       if (quote.status !== "draft") {
+//         return res.status(400).json({
+//           message: "Quote can only be dispatched from draft status"
+//         });
+//       }
+
+//       if (quote.is_quote_sent_to_client) {
+//         return res.status(400).json({
+//           message: "Quote has already been sent to client"
+//         });
+//       }
+
+//       const {
+//         services,
+//         subtotal_amount,
+//         gst_amount,
+//         total_amount,
+//         preferred_contact_method,
+//         contact_first_name,
+//         contact_last_name,
+//         contact_mobile,
+//         contact_landline,
+//         // status,
+//         expiry_end,
+//         sent_by_user_uuid
+//       } = req.body;
+
+//       // ===== Validate preferred contact =====
+//       const allowedContact = ["mobile", "landline", "email"];
+//       if (preferred_contact_method && !allowedContact.includes(preferred_contact_method)) {
+//         return res.status(400).json({ message: "Invalid preferred contact method" });
+//       }
+
+//       // ===== Validate services =====
+//       if (!Array.isArray(services) || services.length === 0)
+//         return res.status(400).json({ message: "Services are required and must be a non-empty array" });
+
+//       for (const s of services) {
+//         if (typeof s.unit_price !== "number" || s.unit_price < 0)
+//           return res.status(400).json({ message: "Unit price is required, must be a number, and cannot be negative" });
+//         if (typeof s.quantity !== "number" || s.quantity <= 0)
+//           return res.status(400).json({ message: "Quantity is required, must be a number, and must be greater than zero" });
+//       }
+
+//       // ===== Validate totals =====
+//       const calcSubtotal = services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0);
+//       const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+//       const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+//       if (calcSubtotal !== subtotal_amount) return res.status(400).json({ message: "Subtotal mismatch" });
+//       if (calcGST !== gst_amount) return res.status(400).json({ message: "GST mismatch" });
+//       if (calcTotal !== total_amount) return res.status(400).json({ message: "Total Amount mismatch" });
+
+//       // ===== Parse expiry =====
+//       let expiry_end_date;
+//       console.log({expiry_end}, " backend admin update")
+//       if (expiry_end) {
+//         if (/^\d{4}-\d{2}-\d{2}$/.test(expiry_end)) {
+//           const [year, month, day] = expiry_end.split("-").map(Number);
+//           expiry_end_date = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+//         } else {
+//           expiry_end_date = new Date(expiry_end);
+//         }
+//       } else {
+//         expiry_end_date = new Date();
+//       }
+
+//       //min is 2 days
+//       // Check if expiry is at least 2 days from now
+//       const minExpiryDate = new Date();
+//       minExpiryDate.setUTCDate(minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS);
+//       minExpiryDate.setUTCHours(23, 59, 59, 999);
+
+//       if (expiry_end_date < minExpiryDate) {
+//         // overwrite to 3 days from now if too soon
+//         expiry_end_date = minExpiryDate;
+//       }
+//       // ===== Prepare updateData =====
+//       const updateData = {
+//         ...quote, // preserve existing fields
+//         services,
+//         subtotal_amount,
+//         gst_amount,
+//         total_amount,
+//         expiry_end: expiry_end_date.toISOString(),
+//         status: "sent",
+//         is_quote_sent_to_client: true,
+//         quote_sent_at: new Date().toISOString(),
+//         sent_by_user_uuid: sent_by_user_uuid ?? null
+//       };
+
+//       // Optional contact updates
+//       if (preferred_contact_method) updateData.preferred_contact_method = preferred_contact_method;
+//       if (contact_mobile) updateData.contact_mobile = contact_mobile;
+//       if (contact_landline) updateData.contact_landline = contact_landline;
+//       if (contact_first_name) updateData.contact_first_name = contact_first_name;
+//       if (contact_last_name) updateData.contact_last_name = contact_last_name;
+
+//       // ===== Update quote =====
+//       const updatedQuote = await Quote.updateByUUID(uuid, updateData);
+//       if (!updatedQuote) return res.status(400).json({ message: `Failed to update quote with uuid: ${uuid}` });
+//       console.log({expiry_end_date})
+//       // ===== Create access token =====
+//       let accessToken ;
+      
+//       try {
+//           accessToken = await QuoteAccessToken.revokeAllForQuote(updatedQuote.uuid);
+//           const rawToken = crypto.randomBytes(32).toString("hex");
+//           const token_hash = hashToken(rawToken);
+
+//           const expires_at = new Date(updatedQuote.expiry_end);
+
+//         let tokenUUID;
+//         let exists;
+//         do {
+//           tokenUUID = generateShortId(9);
+//           exists = await QuoteAccessToken.findByUUID(tokenUUID);
+//         } while (exists);
+
+//           await QuoteAccessToken.create({
+//           quote_uuid: updatedQuote.uuid,
+//           token_hash,
+//           expires_at: expires_at.toISOString(), // token expires with the quote
+//           uuid: tokenUUID,
+//         });
+
+//           const quoteViewLink = `${process.env.CLIENT_URL}/quotes/view/${updatedQuote.uuid}?token=${rawToken}`;
+
+//           const emailData = {
+//           quoteUUID: updatedQuote.uuid,
+//           name: formatFullName(updatedQuote.contact_first_name, updatedQuote.contact_last_name),
+//           total: updatedQuote.total_amount,
+//           subtotal: updatedQuote.subtotal_amount,
+//           gst: updatedQuote.gst_amount,
+//           services: updatedQuote.services,
+//           quoteLink: quoteViewLink,
+//           expiry: formatExpiry(expires_at), // display human-readable expiry
+//         };
+//           if (updatedQuote.contact_mobile) emailData.mobile = updatedQuote.contact_mobile;
+//           if (updatedQuote.contact_landline) emailData.landline = updatedQuote.contact_landline;
+//           if (updatedQuote.message) emailData.message = updatedQuote.message;
+//           if (updatedQuote.contact_email) emailData.email = updatedQuote.contact_email;
+//           if (updatedQuote.images && updatedQuote.images.length > 0) emailData.images = updatedQuote.images;
+
+//           const filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
+
+//           const pdfBuffer = await generateQuotePDF(updatedQuote, null);
+//           const { data , error: uploadError } = await supabase.storage
+//           .from("quotes-pdf")
+//           .upload(filePath, pdfBuffer, {
+//             contentType: "application/pdf",
+//             upsert: true
+//           });
+
+//           if (uploadError) throw uploadError;
+
+//           const pdfUrl = publicData.publicUrl;
+    
+//           const updatedQuote = await Quote.updateByUUID(uuid, {
+//             quote_pdf_url: pdfUrl,
+//             quote_pdf_version: quote.pdf_version + 1,
+//             quote_version_reason: "quote_accepted"
+//           });
+//             // Send the email to the client
+//           await sendQuoteToClient({
+//             to: quote.contact_email,
+//             subject: "Your Quote is Ready",
+//             data: emailData,
+//             pdfBuffer
+//           });
+//         // accessToken  = await dispatchQuoteToClient(updated);
+  
+//       } catch (emailError) {
+//         console.error("Failed to send quote email:", emailError);
+//       }
+
+//       return res.status(200).json({ quote: updated });
+
+//     } catch (error) {
+//       console.error(error);
+//       return res.status(500).json({ error: error.message });
+//     }
+//   };
+
+
+  
+ // copy of original before changing above
+// export const updateQuoteByUUIDEmployee = async (req, res) => {
+//     const { uuid } = req.params;
+//     if (!uuid) return res.status(400).json({ message: "Quote uuid is required" });
+
+//     try {
+      
+//       // ===== Find quote =====
+//       const quote = await Quote.findByUUID(uuid);
+//       if (!quote)
+//         return res.status(400).json({ message: `Failed to find quote with uuid: ${uuid}` });
+//        // ---------- State Guard ----------
+//       if (quote.status !== "draft") {
+//         return res.status(400).json({
+//           message: "Quote can only be dispatched from draft status"
+//         });
+//       }
+
+//       if (quote.is_quote_sent_to_client) {
+//         return res.status(400).json({
+//           message: "Quote has already been sent to client"
+//         });
+//       }
+
+//       const {
+//         services,
+//         subtotal_amount,
+//         gst_amount,
+//         total_amount,
+//         preferred_contact_method,
+//         contact_first_name,
+//         contact_last_name,
+//         contact_mobile,
+//         contact_landline,
+//         // status,
+//         expiry_end,
+//         sent_by_user_uuid
+//       } = req.body;
+
+//       // ===== Validate preferred contact =====
+//       const allowedContact = ["mobile", "landline", "email"];
+//       if (preferred_contact_method && !allowedContact.includes(preferred_contact_method)) {
+//         return res.status(400).json({ message: "Invalid preferred contact method" });
+//       }
+
+//       // ===== Validate services =====
+//       if (!Array.isArray(services) || services.length === 0)
+//         return res.status(400).json({ message: "Services are required and must be a non-empty array" });
+
+//       for (const s of services) {
+//         if (typeof s.unit_price !== "number" || s.unit_price < 0)
+//           return res.status(400).json({ message: "Unit price is required, must be a number, and cannot be negative" });
+//         if (typeof s.quantity !== "number" || s.quantity <= 0)
+//           return res.status(400).json({ message: "Quantity is required, must be a number, and must be greater than zero" });
+//       }
+
+//       // ===== Validate totals =====
+//       const calcSubtotal = services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0);
+//       const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+//       const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+//       if (calcSubtotal !== subtotal_amount) return res.status(400).json({ message: "Subtotal mismatch" });
+//       if (calcGST !== gst_amount) return res.status(400).json({ message: "GST mismatch" });
+//       if (calcTotal !== total_amount) return res.status(400).json({ message: "Total Amount mismatch" });
+
+//       // ===== Parse expiry =====
+//       let expiry_end_date;
+//       console.log({expiry_end}, " backend admin update")
+//       if (expiry_end) {
+//         if (/^\d{4}-\d{2}-\d{2}$/.test(expiry_end)) {
+//           const [year, month, day] = expiry_end.split("-").map(Number);
+//           expiry_end_date = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+//         } else {
+//           expiry_end_date = new Date(expiry_end);
+//         }
+//       } else {
+//         expiry_end_date = new Date();
+//       }
+
+//       //min is 2 days
+//       // Check if expiry is at least 2 days from now
+//       const minExpiryDate = new Date();
+//       minExpiryDate.setUTCDate(minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS);
+//       minExpiryDate.setUTCHours(23, 59, 59, 999);
+
+//       if (expiry_end_date < minExpiryDate) {
+//         // overwrite to 3 days from now if too soon
+//         expiry_end_date = minExpiryDate;
+//       }
+//       // ===== Prepare updateData =====
+//       const updateData = {
+//         ...quote, // preserve existing fields
+//         services,
+//         subtotal_amount,
+//         gst_amount,
+//         total_amount,
+//         expiry_end: expiry_end_date.toISOString(),
+//         status: "sent",
+//         is_quote_sent_to_client: true,
+//         quote_sent_at: new Date().toISOString(),
+//         sent_by_user_uuid: sent_by_user_uuid ?? null
+//       };
+
+//       // Optional contact updates
+//       if (preferred_contact_method) updateData.preferred_contact_method = preferred_contact_method;
+//       if (contact_mobile) updateData.contact_mobile = contact_mobile;
+//       if (contact_landline) updateData.contact_landline = contact_landline;
+//       if (contact_first_name) updateData.contact_first_name = contact_first_name;
+//       if (contact_last_name) updateData.contact_last_name = contact_last_name;
+
+//       // ===== Update quote =====
+//       const updated = await Quote.updateByUUID(uuid, updateData);
+//       if (!updated) return res.status(400).json({ message: `Failed to update quote with uuid: ${uuid}` });
+//       console.log({expiry_end_date})
+//       // ===== Create access token =====
+//       let accessToken ;
+      
+//       try {
+        
+//         accessToken  = await dispatchQuoteToClient(updated);
+  
+//       } catch (emailError) {
+//         console.error("Failed to send quote email:", emailError);
+//       }
+
+//       return res.status(200).json({ quote: updated });
+
+//     } catch (error) {
+//       console.error(error);
+//       return res.status(500).json({ error: error.message });
+//     }
+//   };
 
 // Update by ID
 export const updateQuoteById = async (req, res) => {
@@ -485,6 +987,48 @@ export const reinstateQuote = async (req, res) => {
 
 // Hard delete
 //works fine 14/01/2026
+// export const hardDeleteQuote = async (req, res) => {
+//   const { uuid } = req.params;
+//   if (!uuid) {
+//     return res.status(400).json({ error: "Quote UUID is required" });
+//   }
+
+//   try {
+//     const quote = await Quote.findByUUID(uuid);
+//     if (!quote) {
+//       return res.status(404).json({ error: "Quote not found" });
+//     }
+
+//     // DELETE IMAGES FIRST
+//     const images = quote.images || [];
+
+//     // Only attempt deletion if images exist
+//     if (images.length > 0) {
+//       const deleteResult = await Quote.deleteImagesFromBucket(images);
+
+//       if (!deleteResult.success) {
+//         console.error("Image deletion failed:", deleteResult.errors);
+//         return res.status(500).json({
+//           error: "Failed to delete images from storage. Quote was NOT deleted.",
+//           details: deleteResult.errors,
+//         });
+//       }
+//     }
+
+//     // ONLY DELETE QUOTE AFTER IMAGES SUCCESSFULLY DELETED
+//     const deleted = await Quote.hardDelete(uuid);
+
+//     return res.status(200).json({
+//       message: "Quote permanently deleted",
+//       data: deleted,
+//     });
+
+//   } catch (error) {
+//     console.error(error);
+//     return res.status(500).json({ error: error.message });
+//   }
+// };
+
 export const hardDeleteQuote = async (req, res) => {
   const { uuid } = req.params;
   if (!uuid) {
@@ -497,13 +1041,10 @@ export const hardDeleteQuote = async (req, res) => {
       return res.status(404).json({ error: "Quote not found" });
     }
 
-    // DELETE IMAGES FIRST
+    // 1️⃣ DELETE IMAGES FIRST
     const images = quote.images || [];
-
-    // Only attempt deletion if images exist
     if (images.length > 0) {
       const deleteResult = await Quote.deleteImagesFromBucket(images);
-
       if (!deleteResult.success) {
         console.error("Image deletion failed:", deleteResult.errors);
         return res.status(500).json({
@@ -513,27 +1054,181 @@ export const hardDeleteQuote = async (req, res) => {
       }
     }
 
-    // ONLY DELETE QUOTE AFTER IMAGES SUCCESSFULLY DELETED
+    // 2️⃣ DELETE RELATED JOBS
+    await Job.deleteByQuoteUUID(uuid); // <-- delete all jobs referencing this quote
+
+    // 3️⃣ DELETE THE QUOTE
     const deleted = await Quote.hardDelete(uuid);
 
     return res.status(200).json({
-      message: "Quote permanently deleted",
+      message: "Quote and related jobs permanently deleted",
       data: deleted,
     });
-
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: error.message });
   }
 };
 
+// export const acceptQuote = async (req, res) => {
+//   const { uuid } = req.params; 
+//   const { token } = req.body;
+
+//   if (!uuid) {
+//     return res.status(400).json({ error: "Quote UUID is required" });
+//   }
+
+//   let customerCreated = false;
+//   let jobCreated = false;
+//   let customer, job;
+
+//   try {
+//     //  Load quote
+//     const quote = await Quote.findByUUID(uuid);
+//     if (!quote) {
+//       return res.status(404).json({ error: "Quote not found" });
+//     }
+
+//     //  Prevent double response
+//     if (quote.responded_at) {
+//       return res.status(400).json({
+//         error: "Quote already responded to",
+//         responded_at: quote.responded_at,
+//       });
+//     }
+
+//     //  Auth: session or token
+//     const hasSession = req.session && req.session.quote_uuid === uuid;
+
+//     if (!hasSession) {
+//       // Fallback to token
+//       if (!token) {
+//         return res.status(401).json({ error: "No session or token provided" });
+//       }
+
+//       const tokenHash = hashToken(token);
+//       const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
+
+//       if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
+//         return res.status(401).json({ error: "Invalid token" });
+//       }
+
+//       if (new Date(tokenRecord.expires_at) < new Date()) {
+//         return res.status(401).json({ error: "Token expired" });
+//       }
+//     }
+
+//     // Find or create customer
+//     const email = quote.contact_email.toLowerCase();
+//     customer = await Customer.findByEmail(email);
+
+//     if (!customer) {
+ 
+//       let customerUUID;
+//       while (true) {
+//         customerUUID = generateShortId(9);
+//         const exists = await Customer.findByUUID(customerUUID);
+//         if (!exists) break;
+//       }
+
+//       customer = await Customer.create({
+//         uuid: customerUUID,
+//         first_name: quote.contact_first_name,
+//         last_name: quote.contact_last_name,
+//         email,
+//         mobile_phone: quote.contact_mobile,
+//         landline_phone: quote.contact_landline,
+//         address: quote.address,
+//         created_via: "quote_accept",
+//       });
+//       customerCreated = true;
+//     }
+    
+//     // Ensure job does not already exist
+//     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
+//     if (existingJob) {
+//       return res.status(400).json({
+//         error: "A job already exists for this quote",
+//         job_uuid: existingJob.uuid,
+//       });
+//     }
+
+//     //  Create job from quote
+//     let jobUUID;
+//     while (true) {
+//       jobUUID = generateShortId(9);
+//       const exists = await Job.findByUUID(jobUUID);
+//       if (!exists) break;
+//     }
+
+//     job = await Job.createFromQuote({
+//       quote,
+//       uuid: jobUUID,
+//       customer_uuid: customer.uuid,
+//       scheduled_at: null,
+//       is_recurring: false,
+//       recurrence_interval: null,
+//       recurrence_frequency: null,
+//       recurrence_end_date: null,
+//     });
+
+//     jobCreated = true;
+
+//     // Update quote status
+//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
+
+//     // Revoke all quote access tokens
+//     await QuoteAccessToken.revokeAllForQuote(quote.uuid);
+
+//     // Destroy session and clear cookie
+//     if (req.session) {
+//       req.session.destroy((err) => {
+//         if (err) console.error("Error destroying session:", err);
+//       });
+//     }
+//     res.clearCookie("quote_session", {
+//       httpOnly: true,
+//       secure: true,
+//       sameSite: "lax",
+//     });
+
+//     try {
+//       await sendQuoteAccepted({ to: quote.contact_email, quote: acceptedQuote });
+//     } catch (err) {
+//       console.error("Failed to send accepted email:", err);
+//     }
+
+//     return res.status(200).json({
+//       message: "Quote accepted successfully",
+//       quote: acceptedQuote,
+//       customer,
+//       job,
+//     });
+//   } catch (error) {
+//     console.error("Accept quote error:", error);
+//     // 🔄 Rollback on failure
+//     if (jobCreated && job?.uuid) {
+//       await Job.deleteByUUID(job.uuid).catch(console.error);
+//     }
+//     if (customerCreated && customer?.uuid) {
+//       await Customer.deleteByUUID(customer.uuid).catch(console.error);
+//     }
+  
+//     return res.status(500).json({ error: error.message });
+//   }
+
+// };
 
 export const acceptQuote = async (req, res) => {
-  const { uuid } = req.params; 
+  const { uuid } = req.params;
   const { token } = req.body;
 
   if (!uuid) {
     return res.status(400).json({ error: "Quote UUID is required" });
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: "Token required" });
   }
 
   let customerCreated = false;
@@ -541,13 +1236,13 @@ export const acceptQuote = async (req, res) => {
   let customer, job;
 
   try {
-    //  Load quote
+    // Load quote
     const quote = await Quote.findByUUID(uuid);
     if (!quote) {
       return res.status(404).json({ error: "Quote not found" });
     }
 
-    //  Prevent double response
+    // Prevent double response
     if (quote.responded_at) {
       return res.status(400).json({
         error: "Quote already responded to",
@@ -555,25 +1250,16 @@ export const acceptQuote = async (req, res) => {
       });
     }
 
-    //  Auth: session or token
-    const hasSession = req.session && req.session.quote_uuid === uuid;
+    // Validate token
+    const tokenHash = hashToken(token);
+    const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
 
-    if (!hasSession) {
-      // Fallback to token
-      if (!token) {
-        return res.status(401).json({ error: "No session or token provided" });
-      }
+    if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
 
-      const tokenHash = hashToken(token);
-      const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
-
-      if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
-        return res.status(401).json({ error: "Invalid token" });
-      }
-
-      if (new Date(tokenRecord.expires_at) < new Date()) {
-        return res.status(401).json({ error: "Token expired" });
-      }
+    if (new Date(tokenRecord.expires_at) < new Date()) {
+      return res.status(401).json({ error: "Token expired" });
     }
 
     // Find or create customer
@@ -581,7 +1267,6 @@ export const acceptQuote = async (req, res) => {
     customer = await Customer.findByEmail(email);
 
     if (!customer) {
- 
       let customerUUID;
       while (true) {
         customerUUID = generateShortId(9);
@@ -599,9 +1284,10 @@ export const acceptQuote = async (req, res) => {
         address: quote.address,
         created_via: "quote_accept",
       });
+
       customerCreated = true;
     }
-    
+
     // Ensure job does not already exist
     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
     if (existingJob) {
@@ -611,7 +1297,7 @@ export const acceptQuote = async (req, res) => {
       });
     }
 
-    //  Create job from quote
+    // Create job from quote
     let jobUUID;
     while (true) {
       jobUUID = generateShortId(9);
@@ -631,27 +1317,39 @@ export const acceptQuote = async (req, res) => {
     });
 
     jobCreated = true;
-
-    // Update quote status
+    const filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
+    // Accept quote (this sets responded_at)
     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
+    const pdfBuffer = await generateQuotePDF(acceptedQuote, customer);
+    const { data , error: uploadError } = await supabase.storage
+    .from("quotes-pdf")
+    .upload(filePath, pdfBuffer, {
+      contentType: "application/pdf",
+      upsert: true
+    });
 
+    if (uploadError) throw uploadError;
+
+    const { data: publicData } = supabase.storage
+    .from("quotes-pdf")
+    .getPublicUrl(filePath);
+
+    const pdfUrl = publicData.publicUrl;
+    
+    const updatedQuote = await Quote.update(uuid, {
+      quote_pdf_url: pdfUrl,
+      quote_pdf_version: quote.pdf_version + 1,
+      quote_version_reason: "quote_accepted"
+    });
     // Revoke all quote access tokens
     await QuoteAccessToken.revokeAllForQuote(quote.uuid);
 
-    // Destroy session and clear cookie
-    if (req.session) {
-      req.session.destroy((err) => {
-        if (err) console.error("Error destroying session:", err);
-      });
-    }
-    res.clearCookie("quote_session", {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-    });
-
     try {
-      await sendQuoteAccepted({ to: quote.contact_email, quote: acceptedQuote });
+      await sendQuoteAccepted({
+        to: quote.contact_email,
+        quote: updatedQuote,
+        pdfBuffer
+      });
     } catch (err) {
       console.error("Failed to send accepted email:", err);
     }
@@ -664,17 +1362,17 @@ export const acceptQuote = async (req, res) => {
     });
   } catch (error) {
     console.error("Accept quote error:", error);
-    // 🔄 Rollback on failure
+
+    // Rollback
     if (jobCreated && job?.uuid) {
       await Job.deleteByUUID(job.uuid).catch(console.error);
     }
     if (customerCreated && customer?.uuid) {
       await Customer.deleteByUUID(customer.uuid).catch(console.error);
     }
-  
+
     return res.status(500).json({ error: error.message });
   }
-
 };
 
 export const rejectQuote = async (req, res) => {

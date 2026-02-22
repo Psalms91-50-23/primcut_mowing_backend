@@ -5,7 +5,8 @@ const DEFAULT_LENGTH = 9;
 import jwt from 'jsonwebtoken';
 import QuoteAccessToken from '../models/QuoteAccessToken.js';
 import { RecaptchaEnterpriseServiceClient } from "@google-cloud/recaptcha-enterprise";
-import { sendQuoteToClient } from "../lib/email/index.js"
+import { sendQuoteToClient } from "../lib/email/index.js";
+import PDFDocument from "pdfkit";
 const EMAIL_SECRET = process.env.EMAIL_SECRET || 'supersecret123';
 const EMAIL_TOKEN_EXPIRATION = '5m'; // 5 minutes for testing
 const PASSWORD_RESET_TOKEN = process.env.RESET_PASSWORD_TOKEN_SECRET || 'SuperSecretPasswordResetKey_!!!';
@@ -18,7 +19,6 @@ const COUNTRY_CODES = {
   UK: /^(\+44)(7\d{3}|\d{2,4})\d{6,8}$/,         // United Kingdom
   // Add more countries as needed
 };
-
 /**
  * Helper to get country dialing code
  * @param {string} country
@@ -33,7 +33,6 @@ export const getCountryCode = (country) => {
     default: return "+64"; // fallback NZ
   }
 }
-
 
 /**
  * Normalize international phone numbers.
@@ -165,6 +164,11 @@ export const deleteAllFilesFromBucket = async () => {
   }
 }
 
+export const capitalize = (str = "") => {
+  if (!str) return "";
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+};
+
 export const formatFullName = (
   firstName,
   lastName,
@@ -285,7 +289,7 @@ export function hashToken(token) {
 //   return rawToken;
 // }
 
-export async function createQuoteAccessToken(quote) {
+export async function dispatchQuoteToClient(quote) {
   // Revoke any previous tokens for this quote
   await QuoteAccessToken.revokeAllForQuote(quote.uuid);
 
@@ -346,3 +350,885 @@ export async function createQuoteAccessToken(quote) {
   return rawToken;
 }
 
+// export const generateQuotePDF = async (quote) => {
+//   return new Promise((resolve, reject) => {
+//     try {
+//       const doc = new PDFDocument({ margin: 50 });
+
+//       const chunks = [];
+//       doc.on("data", (chunk) => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+//       // ===== Header =====
+//       doc.fontSize(20).text("Lawn Mowing Quote", { align: "center" });
+//       doc.moveDown();
+
+//       // Business + Client Info
+//       doc.fontSize(12);
+//       doc.text(`Quote ID: ${quote.uuid}`);
+//       doc.text(`Customer: ${quote.customer_name}`);
+//       doc.text(`Address: ${quote.address}`);
+//       doc.moveDown();
+
+//       // Service Description
+//       doc.fontSize(14).text("Service Details");
+//       doc.fontSize(12);
+
+//       quote.items?.forEach((item) => {
+//         doc.text(`• ${item.description} - $${item.price}`);
+//       });
+
+//       doc.moveDown();
+
+//       // Pricing
+//       doc.fontSize(14).text("Pricing Summary");
+//       doc.fontSize(12);
+//       doc.text(`Subtotal: $${quote.subtotal}`);
+//       doc.text(`GST: $${quote.gst}`);
+//       doc.text(`Total: $${quote.total}`);
+
+//       doc.moveDown();
+
+//       if (quote.notes) {
+//         doc.text("Notes:");
+//         doc.text(quote.notes);
+//       }
+
+//       doc.end();
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
+
+// export const generateQuotePDF = async (quote) => {
+//   return new Promise((resolve, reject) => {
+//     try {
+//       const doc = new PDFDocument({
+//         margin: 50,
+//         lineGap: 2,
+//       });
+
+//       const chunks = [];
+
+//       doc.on("data", (chunk) => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+//       // ---------------------------
+//       // Business Header
+//       // ---------------------------
+
+//       doc
+//         .fontSize(22)
+//         .text("Happy Lawns", { align: "center" });
+
+//       doc.fontSize(13).text("QUOTE CONFIRMATION", { align: "center" });
+
+//       doc.moveDown(1.5);
+
+//       // Divider
+//       doc
+//         .moveTo(50, doc.y)
+//         .lineTo(550, doc.y)
+//         .stroke();
+
+//       doc.moveDown(1.5);
+
+//       // ---------------------------
+//       // Document Meta
+//       // ---------------------------
+
+//       const customerName = `${quote.contact_first_name || ""} ${quote.contact_last_name || ""}`.trim();
+
+//       doc.fontSize(11);
+
+//       doc.text(`Quote Number: ${quote.uuid || "-"}`);
+//       doc.text(
+//         `Date Issued: ${
+//           quote.created_at
+//             ? new Date(quote.created_at).toLocaleDateString()
+//             : "-"
+//         }`
+//       );
+
+//       if (quote.responded_at) {
+//         doc.text(
+//           `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`
+//         );
+//       }
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Client Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Client Details");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Name: ${customerName || "-"}`);
+//       doc.text(`Email: ${quote.contact_email || "-"}`);
+//       doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+//       doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Address Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Service Address");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11).text(quote.address || "-");
+
+//       doc.moveDown();
+
+//       // Divider
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown(1);
+
+//       // ---------------------------
+//       // Scope Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Scope of Work");
+//       doc.moveDown(0.7);
+
+//       doc.fontSize(11);
+
+//       quote.services?.forEach((service) => {
+//         const lineTotal =
+//           (service.quantity || 1) * (service.unit_price || 0);
+
+//         doc.text(`• ${service.label || service.description || "Service"}`);
+
+//         doc.text(
+//           `  Qty: ${service.quantity || 1} | Unit Price: $${(
+//             service.unit_price || 0
+//           ).toFixed(2)} | Line Total: $${lineTotal.toFixed(2)}`
+//         );
+
+//         doc.moveDown(0.4);
+//       });
+
+//       doc.moveDown();
+
+//       // Divider
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Pricing Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Pricing Summary");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(
+//         `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.text(
+//         `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(14).text(
+//         `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Status Block
+//       // ---------------------------
+
+//       doc.fontSize(11);
+
+//       doc.text("Status:");
+//       doc.text(
+//         "✅ This quote has been accepted. A job has been created."
+//       );
+
+//       doc.text(
+//         "Scheduling confirmation will be sent once the job is booked."
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Notes Block
+//       // ---------------------------
+
+//       if (quote.message) {
+//         doc.fontSize(11).text("Client Message:");
+//         doc.moveDown(0.3);
+
+//         doc.text(quote.message);
+//       }
+
+//       // ---------------------------
+//       // Footer
+//       // ---------------------------
+
+//       doc.fontSize(10);
+
+//       doc
+//         .moveDown(2)
+//         .text(
+//           "Thank you for choosing Happy Lawns",
+//           { align: "center" }
+//         );
+
+//       doc
+//         .text(
+//           "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+//           { align: "center" }
+//         );
+
+//       doc.end();
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
+
+// export const generateQuotePDF = async (quote, customer = null) => {
+//   return new Promise((resolve, reject) => {
+//     try {
+//       const doc = new PDFDocument({
+//         margin: 50,
+//         lineGap: 2,
+//       });
+
+//       const chunks = [];
+
+//       doc.on("data", (chunk) => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+//       // ---------------------------
+//       // Business Header
+//       // ---------------------------
+
+//       doc
+//         .fontSize(22)
+//         .text("Happy Lawns", { align: "center" });
+
+//       doc.moveDown(0.5);
+      
+//       doc.fontSize(13)
+//       .text("QUOTE CONFIRMATION", { align: "center" });
+//       // Business Identification Block
+//       doc
+//         .fontSize(10)
+//         .text(`NZBN: ${process.env.NZBN}`, { align: "center" });
+
+//       doc
+//         .text(`GST Number: ${process.env.GST}`, { align: "center" });
+
+//       doc
+//         .text(`Phone: ${process.env.CONTACT_NUM}`, { align: "center" });
+
+//       doc
+//         .text(`Email: ${process.env.CONTACT_EMAIL}`, { align: "center" });
+
+//       doc
+//         .text(`Address:  ${process.env.CONTACT_ADDRESS}`, { align: "center" });
+
+//       doc.moveDown(1.5);
+
+//       // Divider
+//       doc
+//         .moveTo(50, doc.y)
+//         .lineTo(550, doc.y)
+//         .stroke();
+
+//       doc.moveDown(1.5);
+
+//       // ---------------------------
+//       // Document Meta
+//       // ---------------------------
+
+//       const customerName = `${quote.contact_first_name || ""} ${quote.contact_last_name || ""}`.trim();
+
+//       doc.fontSize(11);
+
+//       doc.text(`Quote Number: ${quote.uuid || "-"}`);
+//       doc.text(
+//         `Date Issued: ${
+//           quote.created_at
+//             ? new Date(quote.created_at).toLocaleDateString()
+//             : "-"
+//         }`
+//       );
+
+//       if (quote.responded_at) {
+//         doc.text(
+//           `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`
+//         );
+//       }
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Client Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Client Details");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Name: ${customerName || "-"}`);
+//       doc.text(`Email: ${quote.contact_email || "-"}`);
+//       doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+//       doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Address Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Service Address");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11).text(quote.address || "-");
+
+//       doc.moveDown();
+
+//       // Divider
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown(1);
+
+//       // ---------------------------
+//       // Scope Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Scope of Work");
+//       doc.moveDown(0.7);
+
+//       doc.fontSize(11);
+
+//       quote.services?.forEach((service) => {
+//         const lineTotal =
+//           (service.quantity || 1) * (service.unit_price || 0);
+
+//         doc.text(`• ${service.label || service.description || "Service"}`);
+
+//         doc.text(
+//           `  Qty: ${service.quantity || 1} | Unit Price: $${(
+//             service.unit_price || 0
+//           ).toFixed(2)} | Line Total: $${lineTotal.toFixed(2)}`
+//         );
+
+//         doc.moveDown(0.4);
+//       });
+
+//       doc.moveDown();
+
+//       // Divider
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Pricing Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Pricing Summary");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(
+//         `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.text(
+//         `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(14).text(
+//         `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Status Block
+//       // ---------------------------
+
+//       doc.fontSize(11);
+
+//       doc.text("Status:");
+//       doc.text(
+//         "✅ This quote has been accepted. A job has been created."
+//       );
+
+//       doc.text(
+//         "Scheduling confirmation will be sent once the job is booked."
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Notes Block
+//       // ---------------------------
+
+//       if (quote.message) {
+//         doc.fontSize(11).text("Client Message:");
+//         doc.moveDown(0.3);
+
+//         doc.text(quote.message);
+//       }
+
+//       // ---------------------------
+//       // Footer
+//       // ---------------------------
+
+//       doc.fontSize(10);
+
+//       doc
+//         .moveDown(2)
+//         .text(
+//           "Thank you for choosing Happy Lawns",
+//           { align: "center" }
+//         );
+
+//       doc
+//         .text(
+//           "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+//           { align: "center" }
+//         );
+
+//       doc.end();
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
+
+// export const generateQuotePDF = async (quote, customer = null, image) => {
+
+//   return new Promise((resolve, reject) => {
+//     try {
+//       const doc = new PDFDocument({
+//         margin: 50,
+//         lineGap: 2,
+//       });
+
+//       const chunks = [];
+
+//       doc.on("data", (chunk) => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+//       // ---------------------------
+//       // Business Header
+//       // ---------------------------
+
+//       doc
+//         .fontSize(22)
+//         .text("Happy Lawns", { align: "center" });
+
+//       doc.fontSize(13).text("QUOTE CONFIRMATION", { align: "center" });
+
+//       doc
+//         .fontSize(10)
+//         .text(`NZBN: ${process.env.NZBN}`, { align: "center" });
+
+//       doc
+//         .text(`GST Number: ${process.env.GST}`, { align: "center" });
+
+//       doc
+//         .text(`Phone: ${process.env.CONTACT_NUM}`, { align: "center" });
+
+//       doc
+//         .text(`Email: ${process.env.CONTACT_EMAIL}`, { align: "center" });
+
+//       doc
+//         .text(`Address:  ${process.env.CONTACT_ADDRESS}`, { align: "center" });
+
+//       doc.moveDown(1.5);
+
+//       doc.moveTo(50, doc.y)
+//         .lineTo(550, doc.y)
+//         .stroke();
+
+//       doc.moveDown(1.5);
+
+//       // ---------------------------
+//       // Document Meta
+//       // ---------------------------
+      
+//       const customerName = `${capitalize(quote.contact_first_name) || ""} ${capitalize(quote.contact_last_name) || ""}`.trim();
+
+//       doc.fontSize(11);
+
+//       doc.text(`Quote Number: ${quote.uuid || "-"}`);
+//       doc.text(
+//         `Date Issued: ${
+//           quote.created_at
+//             ? new Date(quote.created_at).toLocaleDateString()
+//             : "-"
+//         }`
+//       );
+
+//       // ✅ Customer UUID / Customer ID (NEW)
+//       if (customer?.uuid) {
+//         doc.text(`Customer ID: ${customer.uuid}`);
+//       }
+
+//       if (quote.responded_at) {
+//         doc.text(
+//           `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`
+//         );
+//       }
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Client Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Client Details");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Name: ${customerName || "-"}`);
+//       doc.text(`Email: ${quote.contact_email || "-"}`);
+//       doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+//       doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Address Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Service Address");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11).text(quote.address || "-");
+
+//       doc.moveDown();
+
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown(1);
+
+//       // ---------------------------
+//       // Scope Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Scope of Work");
+//       doc.moveDown(0.7);
+
+//       doc.fontSize(11);
+
+//       quote.services?.forEach((service) => {
+//         const lineTotal =
+//           (service.quantity || 1) * (service.unit_price || 0);
+
+//         doc.text(`• ${service.label || service.description || "Service"}`);
+
+//         doc.text(
+//           `  Qty: ${service.quantity || 1} | Unit Price: $${(
+//             service.unit_price || 0
+//           ).toFixed(2)} | Line Total: $${lineTotal.toFixed(2)}`
+//         );
+
+//         doc.moveDown(0.4);
+//       });
+
+//       doc.moveDown();
+
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Pricing Block
+//       // ---------------------------
+
+//       doc.fontSize(13).text("Pricing Summary");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(
+//         `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.text(
+//         `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(14).text(
+//         `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Status Block
+//       // ---------------------------
+
+//       doc.fontSize(11);
+//       doc.text("Status:");
+
+//       if (quote.status === "accepted") {
+//         doc.text(
+//           "✅ This quote has been accepted. A job has been created."
+//         );
+//       } else {
+//         doc.text(`Current Status: ${quote.status || "draft"}`);
+//       }
+
+//       doc.text(
+//         "Scheduling confirmation will be sent once the job is booked."
+//       );
+
+//       doc.moveDown();
+
+//       // ---------------------------
+//       // Notes Block
+//       // ---------------------------
+
+//       if (quote.message) {
+//         doc.fontSize(11).text("Client Message:");
+//         doc.moveDown(0.3);
+
+//         doc.text(quote.message);
+//       }
+
+//       // ---------------------------
+//       // Footer
+//       // ---------------------------
+
+//       doc.fontSize(10);
+
+//       doc
+//         .moveDown(2)
+//         .text(
+//           "Thank you for choosing Happy Lawns",
+//           { align: "center" }
+//         );
+
+//       doc
+//         .text(
+//           "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+//           { align: "center" }
+//         );
+
+//       doc.end();
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
+
+export const generateQuotePDF = async (quote, customer = null, image) => {
+
+  return new Promise((resolve, reject) => {
+
+    try {
+
+      const doc = new PDFDocument({
+        margin: 50,
+        lineGap: 2,
+      });
+
+      const chunks = [];
+
+      doc.on("data", chunk => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+      const customerName = `${capitalize(quote.contact_first_name) || ""} ${capitalize(quote.contact_last_name) || ""}`.trim();
+
+      // ---------------------------
+      // Brand Header
+      // ---------------------------
+
+      doc.moveDown(0.5);
+
+      doc.fontSize(28);
+
+      doc.text("H", { continued: true });
+
+      if (logoBuffer) {
+        doc.image(logoBuffer, doc.x + 5, doc.y - 28, {
+          width: 32,
+          height: 32
+        });
+
+        doc.text("ppy Lawns", {
+          continued: false,
+          align: "center"
+        });
+      } else {
+        doc.text("ppy Lawns", { align: "center" });
+      }
+
+      doc.moveDown(0.5);
+
+      doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+      doc.moveDown(1);
+
+      // ---------------------------
+      // Quote Confirmation Title
+      // ---------------------------
+
+      doc.fontSize(14).text("QUOTE CONFIRMATION", {
+        align: "center"
+      });
+
+      doc.moveDown(1);
+
+      doc.fontSize(11);
+
+      doc.text(`Quote Number: ${quote.uuid || "-"}`);
+
+      doc.text(
+        `Date Issued: ${
+          quote.created_at
+            ? new Date(quote.created_at).toLocaleDateString()
+            : "-"
+        }`
+      );
+
+      if (quote.responded_at) {
+        doc.text(
+          `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`
+        );
+      }
+
+      doc.moveDown(1);
+
+      // ---------------------------
+      // Client Details Block
+      // ---------------------------
+
+      doc.fontSize(13).text("Client Details");
+      doc.moveDown(0.5);
+
+      doc.fontSize(11);
+
+      doc.text(`Name: ${customerName || "-"}`);
+      doc.text(`Email: ${quote.contact_email || "-"}`);
+      doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+      doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+      doc.moveDown(1);
+
+      doc.fontSize(13).text("Service Address");
+      doc.moveDown(0.3);
+
+      doc.fontSize(11).text(quote.address || "-");
+
+      doc.moveDown(1);
+
+      doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+      doc.moveDown(1);
+
+      // ---------------------------
+      // Scope of Work Table
+      // ---------------------------
+
+      doc.fontSize(13).text("Scope of Work");
+
+      doc.moveDown(0.6);
+
+      const tableStartY = doc.y + 10;
+
+      const colService = 50;
+      const colQty = 250;
+      const colUnitPrice = 330;
+      const colTotal = 430;
+
+      doc.rect(50, tableStartY, 500, 22).fill("#f0fdf4");
+
+      doc.fillColor("black");
+      doc.fontSize(10);
+
+      doc.text("Service", colService, tableStartY + 6);
+      doc.text("Qty", colQty, tableStartY + 6);
+      doc.text("Unit Price", colUnitPrice, tableStartY + 6);
+      doc.text("Line Total", colTotal, tableStartY + 6);
+
+      let y = tableStartY + 28;
+
+      quote.services?.forEach((service) => {
+
+        const lineTotal =
+          (service.quantity || 1) * (service.unit_price || 0);
+
+        doc.fontSize(10);
+
+        doc.text(
+          service.label || service.description || "Service",
+          colService,
+          y
+        );
+
+        doc.text((service.quantity || 1).toString(), colQty, y);
+
+        doc.text(
+          `$${(service.unit_price || 0).toFixed(2)}`,
+          colUnitPrice,
+          y
+        );
+
+        doc.text(
+          `$${lineTotal.toFixed(2)}`,
+          colTotal,
+          y
+        );
+
+        y += 22;
+      });
+
+      doc.moveDown(2);
+
+      doc.end();
+
+    } catch (err) {
+      reject(err);
+    }
+
+  });
+
+};
+// Header
+// ------------------------------------------------
+// Document Meta
+
+// Client Block
+// ------------------------------------------------
+// Service Address Block
+
+// Scope Block
+// ------------------------------------------------
+// Pricing Table Style Block
+
+// Status Block
+// ------------------------------------------------
+// Notes Block
+
+// Footer

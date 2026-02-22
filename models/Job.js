@@ -83,6 +83,18 @@ class Job {
         return data;
     }
 
+    static async deleteByQuoteUUID(quote_uuid) {
+        const { data, error } = await supabase
+            .from('jobs')
+            .delete()
+            .eq('quote_uuid', quote_uuid)
+            .select('*')
+            .maybeSingle();
+
+        if (error) throw new Error(`Error fetching job with quote UUID ${quote_uuid}: ${error.message}`);
+        return data;
+    }
+
 }
 
 

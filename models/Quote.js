@@ -150,7 +150,7 @@ export default class Quote {
         // Prevent empty updates
         if (Object.keys(updates).length === 0) {
             throw new Error("Updates object cannot be empty");
-  }
+        }
         const { data, error } = await supabase
             .from("quotes")
             .update({
@@ -284,10 +284,15 @@ export default class Quote {
         .eq("uuid", uuid)
         .eq('is_expired', false)
         .eq('is_deleted', false)
+        .is("responded_at", null) // ⭐ THIS IS THE MOST IMPORTANT LINE
         .select("*")
-        .single();
+        .maybeSingle();
 
         if (error) throw new Error(`Error accepting quote: ${error.message}`);
+
+        if (!data) {
+            throw new Error("Quote already processed or locked");
+        }
         return data;
     }
 
