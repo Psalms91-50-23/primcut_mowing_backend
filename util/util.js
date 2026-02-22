@@ -1047,6 +1047,10 @@ export async function dispatchQuoteToClient(quote) {
 
 export const generateQuotePDF = async (quote, customer = null) => {
 
+  const path = require("path");
+  const fs = require("fs");
+  const PDFDocument = require("pdfkit");
+
   const headerImagePath = path.join(
     process.cwd(),
     "assets/pdf/happy-lawns-header.png"
@@ -1079,9 +1083,9 @@ export const generateQuotePDF = async (quote, customer = null) => {
         capitalize(quote.contact_last_name) || ""
       }`.trim();
 
-      // ===============================
-      // Header Image (Top Absolute)
-      // ===============================
+      // ======================================================
+      // HEADER IMAGE (ABSOLUTE TOP)
+      // ======================================================
 
       const HEADER_HEIGHT = 120;
 
@@ -1098,12 +1102,12 @@ export const generateQuotePDF = async (quote, customer = null) => {
         );
       }
 
-      // Move cursor below header
+      // Move cursor below header band
       doc.y = HEADER_HEIGHT + 20;
 
-      // ===============================
-      // Document Title Section
-      // ===============================
+      // ======================================================
+      // TITLE SECTION
+      // ======================================================
 
       doc.fontSize(14).fillColor("black");
 
@@ -1115,10 +1119,9 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.fontSize(11);
 
-      doc.text(
-        `Quote Number: ${quote.uuid || "-"}`,
-        { align: "center" }
-      );
+      doc.text(`Quote Number: ${quote.uuid || "-"}`, {
+        align: "center"
+      });
 
       doc.text(
         `Date Issued: ${
@@ -1131,18 +1134,42 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       if (quote.responded_at) {
         doc.text(
-          `Date Accepted: ${new Date(
-            quote.responded_at
-          ).toLocaleDateString()}`,
+          `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`,
           { align: "center" }
         );
       }
 
+      // ======================================================
+      // BUSINESS DETAILS BLOCK
+      // ======================================================
+
       doc.moveDown(1);
 
-      // ===============================
-      // Client Details
-      // ===============================
+      doc.fontSize(11).text(`NZBN: ${process.env.NZBN || "-"}`, {
+        align: "center"
+      });
+
+      doc.text(`GST Number: ${process.env.GST || "-"}`, {
+        align: "center"
+      });
+
+      doc.text(`Phone: ${process.env.CONTACT_NUM || "-"}`, {
+        align: "center"
+      });
+
+      doc.text(`Email: ${process.env.CONTACT_EMAIL || "-"}`, {
+        align: "center"
+      });
+
+      doc.text(`Address: ${process.env.CONTACT_ADDRESS || "-"}`, {
+        align: "center"
+      });
+
+      doc.moveDown(1);
+
+      // ======================================================
+      // CLIENT DETAILS
+      // ======================================================
 
       doc.fontSize(13).text("Client Details");
       doc.moveDown(0.5);
@@ -1167,12 +1194,11 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.moveDown(1);
 
-      // ===============================
-      // Scope Table
-      // ===============================
+      // ======================================================
+      // SCOPE TABLE
+      // ======================================================
 
       doc.fontSize(13).text("Scope of Work");
-
       doc.moveDown(0.6);
 
       const tableStartY = doc.y + 10;
@@ -1210,11 +1236,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
           y
         );
 
-        doc.text(
-          (service.quantity || 1).toString(),
-          colQty,
-          y
-        );
+        doc.text((service.quantity || 1).toString(), colQty, y);
 
         doc.text(
           `$${(service.unit_price || 0).toFixed(2)}`,
@@ -1231,9 +1253,33 @@ export const generateQuotePDF = async (quote, customer = null) => {
         y += 22;
       });
 
-      // ===============================
-      // Footer Section
-      // ===============================
+      // ======================================================
+      // PRICING SUMMARY
+      // ======================================================
+
+      doc.moveDown(2);
+
+      doc.fontSize(11);
+
+      doc.text(
+        `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
+      );
+
+      doc.text(
+        `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
+      );
+
+      doc.moveDown(0.5);
+
+      doc.fontSize(14).text(
+        `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
+      );
+
+      doc.moveDown(1);
+
+      // ======================================================
+      // FOOTER
+      // ======================================================
 
       const FOOTER_Y = doc.page.height - 80;
 
@@ -1266,6 +1312,229 @@ export const generateQuotePDF = async (quote, customer = null) => {
     }
   });
 };
+
+//good but no summary
+// export const generateQuotePDF = async (quote, customer = null) => {
+
+//   const headerImagePath = path.join(
+//     process.cwd(),
+//     "assets/pdf/happy-lawns-header.png"
+//   );
+
+//   let headerBuffer = null;
+
+//   try {
+//     headerBuffer = fs.readFileSync(headerImagePath);
+//   } catch (err) {
+//     console.error("Header asset load failed:", err.message);
+//   }
+
+//   return new Promise((resolve, reject) => {
+
+//     try {
+
+//       const doc = new PDFDocument({
+//         margin: 50,
+//         lineGap: 3
+//       });
+
+//       const chunks = [];
+
+//       doc.on("data", chunk => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+//       doc.on("error", reject);
+
+//       const customerName = `${capitalize(quote.contact_first_name) || ""} ${
+//         capitalize(quote.contact_last_name) || ""
+//       }`.trim();
+
+//       // ===============================
+//       // Header Image (Top Absolute)
+//       // ===============================
+
+//       const HEADER_HEIGHT = 120;
+
+//       if (headerBuffer) {
+//         doc.image(
+//           headerBuffer,
+//           0,
+//           0,
+//           {
+//             width: doc.page.width,
+//             height: HEADER_HEIGHT,
+//             fit: [doc.page.width, HEADER_HEIGHT]
+//           }
+//         );
+//       }
+
+//       // Move cursor below header
+//       doc.y = HEADER_HEIGHT + 20;
+
+//       // ===============================
+//       // Document Title Section
+//       // ===============================
+
+//       doc.fontSize(14).fillColor("black");
+
+//       doc.text("QUOTE CONFIRMATION", {
+//         align: "center"
+//       });
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(
+//         `Quote Number: ${quote.uuid || "-"}`,
+//         { align: "center" }
+//       );
+
+//       doc.text(
+//         `Date Issued: ${
+//           quote.created_at
+//             ? new Date(quote.created_at).toLocaleDateString()
+//             : "-"
+//         }`,
+//         { align: "center" }
+//       );
+
+//       if (quote.responded_at) {
+//         doc.text(
+//           `Date Accepted: ${new Date(
+//             quote.responded_at
+//           ).toLocaleDateString()}`,
+//           { align: "center" }
+//         );
+//       }
+
+//       doc.moveDown(1);
+
+//       // ===============================
+//       // Client Details
+//       // ===============================
+
+//       doc.fontSize(13).text("Client Details");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Name: ${customerName || "-"}`);
+//       doc.text(`Email: ${quote.contact_email || "-"}`);
+//       doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+//       doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+//       doc.moveDown(1);
+
+//       doc.fontSize(13).text("Service Address");
+//       doc.moveDown(0.3);
+
+//       doc.fontSize(11).text(quote.address || "-");
+
+//       doc.moveDown(1);
+
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown(1);
+
+//       // ===============================
+//       // Scope Table
+//       // ===============================
+
+//       doc.fontSize(13).text("Scope of Work");
+
+//       doc.moveDown(0.6);
+
+//       const tableStartY = doc.y + 10;
+
+//       const colService = 50;
+//       const colQty = 250;
+//       const colUnitPrice = 330;
+//       const colTotal = 430;
+
+//       doc.rect(50, tableStartY, 500, 22).fill("#f0fdf4");
+
+//       doc.fillColor("black");
+//       doc.fontSize(10);
+
+//       doc.text("Service", colService, tableStartY + 6);
+//       doc.text("Qty", colQty, tableStartY + 6);
+//       doc.text("Unit Price", colUnitPrice, tableStartY + 6);
+//       doc.text("Line Total", colTotal, tableStartY + 6);
+
+//       let y = tableStartY + 28;
+
+//       quote.services?.forEach(service => {
+
+//         const lineTotal =
+//           (service.quantity || 1) *
+//           (service.unit_price || 0);
+
+//         doc.fontSize(10);
+
+//         doc.text(
+//           service.label ||
+//           service.description ||
+//           "Service",
+//           colService,
+//           y
+//         );
+
+//         doc.text(
+//           (service.quantity || 1).toString(),
+//           colQty,
+//           y
+//         );
+
+//         doc.text(
+//           `$${(service.unit_price || 0).toFixed(2)}`,
+//           colUnitPrice,
+//           y
+//         );
+
+//         doc.text(
+//           `$${lineTotal.toFixed(2)}`,
+//           colTotal,
+//           y
+//         );
+
+//         y += 22;
+//       });
+
+//       // ===============================
+//       // Footer Section
+//       // ===============================
+
+//       const FOOTER_Y = doc.page.height - 80;
+
+//       doc.fontSize(10).fillColor("black");
+
+//       doc.text(
+//         "Thank you for choosing Happy Lawns",
+//         50,
+//         FOOTER_Y,
+//         {
+//           align: "center",
+//           width: 500
+//         }
+//       );
+
+//       doc.text(
+//         "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+//         50,
+//         FOOTER_Y + 15,
+//         {
+//           align: "center",
+//           width: 500
+//         }
+//       );
+
+//       doc.end();
+
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
 
 // Header
 // ------------------------------------------------
