@@ -480,7 +480,8 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // PDF Generation
     // ==============================
-    filePath = `quotes-pdf/${uuid}/quote-${uuid}.pdf`;
+    filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
+    // filePath = `quotes-pdf/${uuid}/quote-${uuid}.pdf`;
 
     const logoUrl = "https://happy-lawns.vercel.app/images/seedream-image.png";
 
