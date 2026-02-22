@@ -7,6 +7,9 @@ import QuoteAccessToken from '../models/QuoteAccessToken.js';
 import { RecaptchaEnterpriseServiceClient } from "@google-cloud/recaptcha-enterprise";
 import { sendQuoteToClient } from "../lib/email/index.js";
 import PDFDocument from "pdfkit";
+import path from "path";
+import fs from "fs";
+
 const EMAIL_SECRET = process.env.EMAIL_SECRET || 'supersecret123';
 const EMAIL_TOKEN_EXPIRATION = '5m'; // 5 minutes for testing
 const PASSWORD_RESET_TOKEN = process.env.RESET_PASSWORD_TOKEN_SECRET || 'SuperSecretPasswordResetKey_!!!';
@@ -1042,7 +1045,20 @@ export async function dispatchQuoteToClient(quote) {
 //   });
 // };
 
-export const generateQuotePDF = async (quote, customer = null, imageLogo = null) => {
+export const generateQuotePDF = async (quote, customer = null) => {
+
+  const headerImagePath = path.join(
+    process.cwd(),
+    "assets/pdf/happy-lawns-header.png"
+  );
+
+  let headerBuffer = null;
+
+  try {
+    headerBuffer = fs.readFileSync(headerImagePath);
+  } catch (err) {
+    console.error("Header asset load failed:", err.message);
+  }
 
   return new Promise((resolve, reject) => {
 
@@ -1050,7 +1066,7 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
 
       const doc = new PDFDocument({
         margin: 50,
-        lineGap: 2,
+        lineGap: 3
       });
 
       const chunks = [];
@@ -1059,99 +1075,74 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      const customerName = `${capitalize(quote.contact_first_name) || ""} ${capitalize(quote.contact_last_name) || ""}`.trim();
+      const customerName = `${capitalize(quote.contact_first_name) || ""} ${
+        capitalize(quote.contact_last_name) || ""
+      }`.trim();
 
-      // ---------------------------
-      // Brand Header
-      // ---------------------------
-      const headerHeight = 120;
-      const headerY = 0;
+      // ===============================
+      // Header Image (Top Absolute)
+      // ===============================
 
-      doc.rect(0, headerY, doc.page.width, headerHeight)
-        .fill("#14532d");
+      const HEADER_HEIGHT = 120;
 
-      doc.fillColor("white");
-      doc.moveDown(0.5);
-      doc.fontSize(28);
-
-      doc.text("H", { continued: true });
-
-        if (imageLogo) {
-
-        const imgWidth = 32;
-        const imgHeight = 32;
-
-        const pageCenter = doc.page.width / 2;
-
-        const imgX = pageCenter - imgWidth / 2 + imgWidth * (2 / 3);
-        const imgY = 40;
-
-        doc.image(imageLogo, imgX, imgY, {
-          width: imgWidth,
-          height: imgHeight
-        });
-
-        const textX = pageCenter + pageCenter * 0.3;
-
-        doc.fillColor("white").fontSize(22);
-
-        doc.text("ppy Lawns", textX, imgY + imgHeight / 4);
-      } else {
-              doc.text("ppy Lawns", { align: "center" });
+      if (headerBuffer) {
+        doc.image(
+          headerBuffer,
+          0,
+          0,
+          {
+            width: doc.page.width,
+            height: HEADER_HEIGHT,
+            fit: [doc.page.width, HEADER_HEIGHT]
+          }
+        );
       }
-      // if (imageLogo) {
-      //   doc.image(imageLogo, doc.x + 5, doc.y - 28, {
-      //     width: 32,
-      //     height: 32
-      //   });
 
-      //   doc.text("ppy Lawns", {
-      //     continued: false,
-      //     align: "center"
-      //   });
+      // Move cursor below header
+      doc.y = HEADER_HEIGHT + 20;
 
-      // } else {
-      //   doc.text("ppy Lawns", { align: "center" });
-      // }
+      // ===============================
+      // Document Title Section
+      // ===============================
 
-      doc.moveDown(0.5);
+      doc.fontSize(14).fillColor("black");
 
-      doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-
-      doc.moveDown(1);
-
-      // ---------------------------
-      // Title
-      // ---------------------------
-
-      doc.fontSize(14).text("QUOTE CONFIRMATION", {
+      doc.text("QUOTE CONFIRMATION", {
         align: "center"
       });
 
-      doc.moveDown(1);
+      doc.moveDown(0.5);
+
       doc.fontSize(11);
 
-      doc.text(`Quote Number: ${quote.uuid || "-"}`);
+      doc.text(
+        `Quote Number: ${quote.uuid || "-"}`,
+        { align: "center" }
+      );
 
       doc.text(
         `Date Issued: ${
           quote.created_at
             ? new Date(quote.created_at).toLocaleDateString()
             : "-"
-        }`
+        }`,
+        { align: "center" }
       );
 
       if (quote.responded_at) {
         doc.text(
-          `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`
+          `Date Accepted: ${new Date(
+            quote.responded_at
+          ).toLocaleDateString()}`,
+          { align: "center" }
         );
       }
 
       doc.moveDown(1);
 
-      // ---------------------------
+      // ===============================
       // Client Details
-      // ---------------------------
+      // ===============================
 
       doc.fontSize(13).text("Client Details");
       doc.moveDown(0.5);
@@ -1176,9 +1167,9 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
 
       doc.moveDown(1);
 
-      // ---------------------------
+      // ===============================
       // Scope Table
-      // ---------------------------
+      // ===============================
 
       doc.fontSize(13).text("Scope of Work");
 
@@ -1203,20 +1194,27 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
 
       let y = tableStartY + 28;
 
-      quote.services?.forEach((service) => {
+      quote.services?.forEach(service => {
 
         const lineTotal =
-          (service.quantity || 1) * (service.unit_price || 0);
+          (service.quantity || 1) *
+          (service.unit_price || 0);
 
         doc.fontSize(10);
 
         doc.text(
-          service.label || service.description || "Service",
+          service.label ||
+          service.description ||
+          "Service",
           colService,
           y
         );
 
-        doc.text((service.quantity || 1).toString(), colQty, y);
+        doc.text(
+          (service.quantity || 1).toString(),
+          colQty,
+          y
+        );
 
         doc.text(
           `$${(service.unit_price || 0).toFixed(2)}`,
@@ -1233,45 +1231,42 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
         y += 22;
       });
 
-      // ---------------------------
-    // Footer Section
-    // ---------------------------
-    const pageHeight = doc.page.height || 792;
-    const footerY = pageHeight - 80;
+      // ===============================
+      // Footer Section
+      // ===============================
 
-    doc.fontSize(10).fillColor("black");
+      const FOOTER_Y = doc.page.height - 80;
 
-    doc.text(
-      "Thank you for choosing Happy Lawns",
-      50,
-      footerY,
-      {
-        align: "center",
-        width: 500
-      }
-    );
+      doc.fontSize(10).fillColor("black");
 
-    doc.moveDown(0.5);
+      doc.text(
+        "Thank you for choosing Happy Lawns",
+        50,
+        FOOTER_Y,
+        {
+          align: "center",
+          width: 500
+        }
+      );
 
-    doc.text(
-      "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
-      50,
-      footerY + 15,
-      {
-        align: "center",
-        width: 500
-      }
-    );
+      doc.text(
+        "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+        50,
+        FOOTER_Y + 15,
+        {
+          align: "center",
+          width: 500
+        }
+      );
 
       doc.end();
 
     } catch (err) {
       reject(err);
     }
-
   });
-
 };
+
 // Header
 // ------------------------------------------------
 // Document Meta
