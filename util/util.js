@@ -1047,10 +1047,6 @@ export async function dispatchQuoteToClient(quote) {
 
 export const generateQuotePDF = async (quote, customer = null) => {
 
-  const path = require("path");
-  const fs = require("fs");
-  const PDFDocument = require("pdfkit");
-
   const headerImagePath = path.join(
     process.cwd(),
     "assets/pdf/happy-lawns-header.png"
