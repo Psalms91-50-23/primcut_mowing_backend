@@ -1041,8 +1041,7 @@ export async function dispatchQuoteToClient(quote) {
 //     }
 //   });
 // };
-
-export const generateQuotePDF = async (quote, customer = null, image) => {
+export const generateQuotePDF = async (quote, customer = null, imageLogo = null) => {
 
   return new Promise((resolve, reject) => {
 
@@ -1057,6 +1056,7 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
 
       doc.on("data", chunk => chunks.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
 
       const customerName = `${capitalize(quote.contact_first_name) || ""} ${capitalize(quote.contact_last_name) || ""}`.trim();
 
@@ -1065,13 +1065,12 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
       // ---------------------------
 
       doc.moveDown(0.5);
-
       doc.fontSize(28);
 
       doc.text("H", { continued: true });
 
-      if (logoBuffer) {
-        doc.image(logoBuffer, doc.x + 5, doc.y - 28, {
+      if (imageLogo) {
+        doc.image(imageLogo, doc.x + 5, doc.y - 28, {
           width: 32,
           height: 32
         });
@@ -1080,6 +1079,7 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
           continued: false,
           align: "center"
         });
+
       } else {
         doc.text("ppy Lawns", { align: "center" });
       }
@@ -1091,7 +1091,7 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
       doc.moveDown(1);
 
       // ---------------------------
-      // Quote Confirmation Title
+      // Title
       // ---------------------------
 
       doc.fontSize(14).text("QUOTE CONFIRMATION", {
@@ -1099,7 +1099,6 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
       });
 
       doc.moveDown(1);
-
       doc.fontSize(11);
 
       doc.text(`Quote Number: ${quote.uuid || "-"}`);
@@ -1121,7 +1120,7 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
       doc.moveDown(1);
 
       // ---------------------------
-      // Client Details Block
+      // Client Details
       // ---------------------------
 
       doc.fontSize(13).text("Client Details");
@@ -1148,7 +1147,7 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
       doc.moveDown(1);
 
       // ---------------------------
-      // Scope of Work Table
+      // Scope Table
       // ---------------------------
 
       doc.fontSize(13).text("Scope of Work");
@@ -1203,8 +1202,6 @@ export const generateQuotePDF = async (quote, customer = null, image) => {
 
         y += 22;
       });
-
-      doc.moveDown(2);
 
       doc.end();
 
