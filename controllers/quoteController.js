@@ -1656,3 +1656,35 @@ export async function viewQuoteByToken(req, res) {
     return res.status(500).json({ error: 'Something went wrong' });
   }
 }
+
+export const autoExpireQuote = async (req, res) => {
+    try {
+        const { uuid } = req.params;
+
+        if (!uuid) {
+            return res.status(400).json({
+                error: "Quote UUID is required"
+            });
+        }
+
+        const quote = await Quote.autoExpire(uuid);
+
+        if (!quote) {
+            return res.status(400).json({
+                error: "Quote could not be auto expired"
+            });
+        }
+
+        return res.status(200).json({
+            message: "Quote auto expired successfully",
+            quote
+        });
+
+    } catch (error) {
+        console.error("Auto expire controller error:", error.message);
+
+        return res.status(400).json({
+            error: error.message || "Auto expire failed"
+        });
+    }
+};

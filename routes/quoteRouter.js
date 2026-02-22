@@ -22,7 +22,8 @@ import {
     updateQuoteByUUIDEmployee,
     deleteAllFilesFromBucket,
     getQuotes,
-    getLimitedQuoteByUUID
+    getLimitedQuoteByUUID,
+    autoExpireQuote
 } from "../controllers/quoteController.js";
 
 import {
@@ -47,6 +48,9 @@ router.get("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee",
 
 // GET quote by UUID
 router.get("/customer/uuid/:uuid", getQuoteByUUID);
+
+//Auto update quote status to expired
+router.patch("/public/customer/uuid/:uuid", publicRateLimit,  autoExpireQuote);
 
 // CREATE quote
 router.post("/create", createQuote);

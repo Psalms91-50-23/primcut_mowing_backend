@@ -401,6 +401,48 @@ export default class Quote {
         return { success: true };
     };
 
+    static async autoExpire(uuid) {
+    if (!uuid) {
+        throw new Error("Quote UUID is required");
+    }
+
+    const now = new Date().toISOString();
+
+    /**
+     * Only expire if:
+     * - Quote is sent
+     * - Not deleted
+     * - Not already responded
+     * - Expiry time passed
+     */
+    const { data, error } = await supabase
+        .from("quotes")
+        .update({
+            status: "expired",
+            is_expired: true,
+            is_active: false,
+            responded_at: now,
+            updated_at: now
+        })
+        .eq("uuid", uuid)
+        .eq("status", "sent")
+        .eq("is_deleted", false)
+        .eq("is_expired", false)
+        .lte("expiry_end", now)
+        .is("responded_at", null)
+        .select("*")
+        .maybeSingle();
+
+    if (error) {
+        throw new Error(`Error auto expiring quote: ${error.message}`);
+    }
+
+    if (!data) {
+        throw new Error("Quote cannot be auto expired or already processed");
+    }
+
+    return data;
+}
 }
 
 
