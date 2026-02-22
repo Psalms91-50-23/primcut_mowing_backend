@@ -402,11 +402,11 @@ export default class Quote {
     };
 
     static async autoExpire(uuid) {
-    if (!uuid) {
-        throw new Error("Quote UUID is required");
-    }
+        if (!uuid) {
+            throw new Error("Quote UUID is required");
+        }
 
-    const now = new Date().toISOString();
+        const now = new Date().toISOString();
 
     /**
      * Only expire if:
@@ -415,34 +415,56 @@ export default class Quote {
      * - Not already responded
      * - Expiry time passed
      */
-    const { data, error } = await supabase
-        .from("quotes")
-        .update({
-            status: "expired",
-            is_expired: true,
-            is_active: false,
-            responded_at: now,
-            updated_at: now
-        })
-        .eq("uuid", uuid)
-        .eq("status", "sent")
-        .eq("is_deleted", false)
-        .eq("is_expired", false)
-        .lte("expiry_end", now)
-        .is("responded_at", null)
-        .select("*")
-        .maybeSingle();
+        const { data, error } = await supabase
+            .from("quotes")
+            .update({
+                status: "expired",
+                is_expired: true,
+                is_active: false,
+                responded_at: now,
+                updated_at: now
+            })
+            .eq("uuid", uuid)
+            .eq("status", "sent")
+            .eq("is_deleted", false)
+            .eq("is_expired", false)
+            .lte("expiry_end", now)
+            .is("responded_at", null)
+            .select("*")
+            .maybeSingle();
 
-    if (error) {
-        throw new Error(`Error auto expiring quote: ${error.message}`);
+        if (error) {
+            throw new Error(`Error auto expiring quote: ${error.message}`);
+        }
+
+        if (!data) {
+            throw new Error("Quote cannot be auto expired or already processed");
+        }
+
+        return data;
     }
 
-    if (!data) {
-        throw new Error("Quote cannot be auto expired or already processed");
-    }
+    static async dispatchQuote(uuid, payload) {
+        if (!uuid) throw new Error("Quote UUID is required");
 
-    return data;
-}
+        const { data, error } = await supabase
+            .from("quotes")
+            .update({
+            ...payload,
+            quote_pdf_version: (payload.quote_pdf_version || 0) + 1,
+            quote_sent_at: new Date().toISOString(),
+            is_quote_sent_to_client: true,
+            status: "sent",
+            updated_at: new Date().toISOString()
+            })
+            .eq("uuid", uuid)
+            .select("*")
+            .single();
+
+        if (error) throw new Error(error.message);
+
+        return data;
+        }
 }
 
 

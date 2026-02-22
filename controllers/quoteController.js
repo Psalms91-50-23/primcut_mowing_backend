@@ -322,6 +322,298 @@ export const updateQuoteByUUID = async (req, res) => {
   }
 };
 
+//latest test 22/02/2025
+// export const updateQuoteByUUIDEmployee = async (req, res) => {
+//   const { uuid } = req.params;
+
+//   if (!uuid) {
+//     return res.status(400).json({ message: "Quote uuid is required" });
+//   }
+
+//   let existingQuote;
+//   let quoteSnapshot = null;
+//   let filePath = null;
+
+//   try {
+//     // ==============================
+//     // Fetch Existing Quote
+//     // ==============================
+//     existingQuote = await Quote.findByUUID(uuid);
+
+//     if (!existingQuote) {
+//       return res.status(404).json({
+//         message: `Quote not found with uuid: ${uuid}`
+//       });
+//     }
+
+//     quoteSnapshot = JSON.parse(JSON.stringify(existingQuote));
+
+//     // State Guard
+//     if (existingQuote.status !== "draft") {
+//       return res.status(400).json({
+//         message: "Quote cannot be dispatched in current state"
+//       });
+//     }
+
+//     if (existingQuote.is_quote_sent_to_client) {
+//       return res.status(400).json({
+//         message: "Quote has already been sent to client"
+//       });
+//     }
+
+//     // ==============================
+//     // Extract Payload
+//     // ==============================
+//     const {
+//       services,
+//       subtotal_amount,
+//       gst_amount,
+//       total_amount,
+//       preferred_contact_method,
+//       contact_first_name,
+//       contact_last_name,
+//       contact_mobile,
+//       contact_landline,
+//       expiry_end,
+//       sent_by_user_uuid,
+//       employer_message
+//     } = req.body;
+
+//     const allowedContact = ["mobile", "landline", "email"];
+
+//     if (
+//       preferred_contact_method &&
+//       !allowedContact.includes(preferred_contact_method)
+//     ) {
+//       return res.status(400).json({
+//         message: "Invalid preferred contact method"
+//       });
+//     }
+
+//     if (!Array.isArray(services) || services.length === 0) {
+//       return res.status(400).json({
+//         message: "Services must be a non-empty array"
+//       });
+//     }
+
+//     for (const s of services) {
+//       if (typeof s.unit_price !== "number" || s.unit_price < 0) {
+//         return res.status(400).json({
+//           message: "Unit price must be a positive number"
+//         });
+//       }
+
+//       if (typeof s.quantity !== "number" || s.quantity <= 0) {
+//         return res.status(400).json({
+//           message: "Quantity must be greater than zero"
+//         });
+//       }
+//     }
+
+//     // ==============================
+//     // Totals Validation
+//     // ==============================
+//     const calcSubtotal = services.reduce(
+//       (sum, s) => sum + s.unit_price * s.quantity,
+//       0
+//     );
+
+//     const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+//     const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+//     if (calcSubtotal !== subtotal_amount) {
+//       return res.status(400).json({ message: "Subtotal mismatch" });
+//     }
+
+//     if (calcGST !== gst_amount) {
+//       return res.status(400).json({ message: "GST mismatch" });
+//     }
+
+//     if (calcTotal !== total_amount) {
+//       return res.status(400).json({ message: "Total mismatch" });
+//     }
+
+//     // ==============================
+//     // Expiry Handling
+//     // ==============================
+//     let expiry_end_date;
+
+//     if (expiry_end) {
+//       expiry_end_date = new Date(expiry_end);
+//     } else {
+//       expiry_end_date = new Date();
+//     }
+
+//     const minExpiryDate = new Date();
+//     minExpiryDate.setUTCDate(
+//       minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS
+//     );
+//     minExpiryDate.setUTCHours(23, 59, 59, 999);
+
+//     if (expiry_end_date < minExpiryDate) {
+//       expiry_end_date = minExpiryDate;
+//     }
+//     const version = (existingQuote.quote_pdf_version || 0) + 1;
+//     // ==============================
+//     // Payload Preparation
+//     // ==============================
+//     const updatePayload = {
+//       services,
+//       subtotal_amount,
+//       gst_amount,
+//       total_amount,
+//       expiry_end: expiry_end_date.toISOString(),
+//       status: "sent",
+//       is_quote_sent_to_client: true,
+//       quote_sent_at: new Date().toISOString(),
+//       sent_by_user_uuid: sent_by_user_uuid ?? null,
+//       preferred_contact_method,
+//       contact_mobile,
+//       contact_landline,
+//       contact_first_name,
+//       contact_last_name,
+//       employer_message: employer_message ?? "",
+//       quote_pdf_url: null,
+//       quote_pdf_version: version,
+//       quote_version_reason: "employee_sent"
+//     };
+
+//     // ==============================
+//     // PDF Generation
+//     // ==============================
+//     filePath = `quotes/${uuid}/v${version}.pdf`;
+//     // filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
+//     // filePath = `quotes-pdf/${uuid}/quote-${uuid}.pdf`;
+
+//     const logoUrl = "https://happy-lawns.vercel.app/images/seedream-image.png";
+
+//     let logoBuffer = null;
+
+//     try {
+//       const response = await fetch(logoUrl);
+//       const arrayBuffer = await response.arrayBuffer();
+//       logoBuffer = Buffer.from(arrayBuffer);
+//     } catch (err) {
+//       console.error("Logo load failed:", err.message);
+//     }
+    
+//     const pdfBuffer = await generateQuotePDF({
+//       ...existingQuote,
+//       ...updatePayload,
+//     }, null, logoBuffer);
+
+//     const { error: uploadError } = await supabase.storage
+//       .from("quotes-pdf")
+//       .upload(filePath, pdfBuffer, {
+//         contentType: "application/pdf",
+//         upsert: true
+//       });
+
+//     if (uploadError) throw uploadError;
+
+//     const { data: publicData } = supabase.storage
+//       .from("quotes-pdf")
+//       .getPublicUrl(filePath);
+
+//     const pdfUrl = publicData.publicUrl;
+//     // ==============================
+//     // Final Database Update
+//     // ==============================
+//     const finalQuote = await Quote.dispatchQuote(uuid, {
+//       ...updatePayload,
+//       quote_pdf_url: pdfUrl
+//     });
+   
+//     await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
+//     const rawToken = crypto.randomBytes(32).toString("hex");
+//     const token_hash = hashToken(rawToken);
+
+//     let tokenUUID;
+//     let exists;
+//     do {
+//       tokenUUID = generateShortId(9);
+//       exists = await QuoteAccessToken.findByUUID(tokenUUID);
+//     } while (exists);
+
+//     await QuoteAccessToken.create({
+//       quote_uuid: finalQuote.uuid,
+//       token_hash,
+//       expires_at: new Date(finalQuote.expiry_end).toISOString(), // token expires with the quote
+//       uuid: tokenUUID,
+//     });
+
+//     console.log({finalQuote})
+//     const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
+//     // ==============================
+//     // Email Dispatch
+//     // ==============================
+//     await sendQuoteToClient({
+//       to: finalQuote.contact_email,
+//       subject: "Your Quote is Ready",
+//       data: {
+//         quoteUUID: finalQuote.uuid,
+//         name: formatFullName(finalQuote.contact_first_name, finalQuote.contact_last_name),
+//         mobile: finalQuote.contact_mobile ?? "",
+//         landline: finalQuote.contact_landline ?? "",
+//         message: finalQuote.message ?? "-",
+//         email: finalQuote.contact_email,
+//         subtotal: finalQuote.subtotal_amount,
+//         gst: finalQuote.gst_amount,
+//         total: finalQuote.total_amount,
+//         services: finalQuote.services,
+//         images: finalQuote.images,
+//         quoteLink,
+//         expiry: formatExpiry(finalQuote.expiry_end),
+//         employer_message: employer_message ?? ""
+//       },
+//       pdfBuffer
+//     });
+
+//     return res.status(200).json({
+//       message: "Quote updated and sent successfully",
+//       quote: finalQuote
+//     });
+
+//   } catch (error) {
+//     console.error(error);
+
+//     // ------------------------------
+//     // Snapshot rollback
+//     // ------------------------------
+//     if (quoteSnapshot) {
+//       try {
+//         await Quote.updateByUUID(uuid, quoteSnapshot);
+//       } catch (rollbackError) {
+//         console.error("Database rollback failed:", rollbackError);
+//       }
+//     }
+//         // ------------------------------
+//     // Quote token rollback
+//     // ------------------------------
+//     try {
+//       await QuoteAccessToken.revokeAllForQuote(uuid);
+//     } catch (e) {
+//       console.error("Token rollback failed:", e);
+//     }
+//     // ------------------------------
+//     // Storage rollback
+//     // ------------------------------
+//     if (filePath) {
+//       try {
+//         await supabase.storage
+//           .from("quotes-pdf")
+//           .remove([filePath]);
+//       } catch (storageError) {
+//         console.error("Storage rollback failed:", storageError);
+//       }
+//     }
+
+//     return res.status(500).json({
+//       error: error.message || "Failed to finalize quote"
+//     });
+//   }
+// };
+
 export const updateQuoteByUUIDEmployee = async (req, res) => {
   const { uuid } = req.params;
 
@@ -337,6 +629,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // Fetch Existing Quote
     // ==============================
+
     existingQuote = await Quote.findByUUID(uuid);
 
     if (!existingQuote) {
@@ -363,6 +656,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // Extract Payload
     // ==============================
+
     const {
       services,
       subtotal_amount,
@@ -412,6 +706,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // Totals Validation
     // ==============================
+
     const calcSubtotal = services.reduce(
       (sum, s) => sum + s.unit_price * s.quantity,
       0
@@ -435,6 +730,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // Expiry Handling
     // ==============================
+
     let expiry_end_date;
 
     if (expiry_end) {
@@ -456,6 +752,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
     // Payload Preparation
     // ==============================
+
     const updatePayload = {
       services,
       subtotal_amount,
@@ -473,17 +770,15 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       contact_last_name,
       employer_message: employer_message ?? "",
       quote_pdf_url: null,
-      quote_pdf_version: (existingQuote.quote_pdf_version || 0) + 1,
       quote_version_reason: "employee_sent"
     };
 
     // ==============================
     // PDF Generation
     // ==============================
-    filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
-    // filePath = `quotes-pdf/${uuid}/quote-${uuid}.pdf`;
 
-    const logoUrl = "https://happy-lawns.vercel.app/images/seedream-image.png";
+    const logoUrl =
+      "https://happy-lawns.vercel.app/images/seedream-image.png";
 
     let logoBuffer = null;
 
@@ -494,40 +789,37 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     } catch (err) {
       console.error("Logo load failed:", err.message);
     }
-    
-    const pdfBuffer = await generateQuotePDF({
-      ...existingQuote,
-      ...updatePayload,
-    }, null, logoBuffer);
 
-    const { error: uploadError } = await supabase.storage
-      .from("quotes-pdf")
-      .upload(filePath, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true
-      });
+    const pdfBuffer = await generateQuotePDF(
+      {
+        ...existingQuote,
+        ...updatePayload
+      },
+      null,
+      logoBuffer
+    );
 
-    if (uploadError) throw uploadError;
-
-    const { data: publicData } = supabase.storage
-      .from("quotes-pdf")
-      .getPublicUrl(filePath);
-
-    const pdfUrl = publicData.publicUrl;
     // ==============================
-    // Final Database Update
+    // Dispatch Pipeline (Model Handles Version + Path)
     // ==============================
-    const finalQuote = await Quote.updateByUUID(uuid, {
-      ...updatePayload,
-      quote_pdf_url: pdfUrl
-    });
-   
+
+    const finalQuote = await Quote.dispatchQuote(
+      uuid,
+      {
+        ...updatePayload
+      },
+      pdfBuffer
+    );
+
+    // Token Rotation
     await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
+
     const rawToken = crypto.randomBytes(32).toString("hex");
     const token_hash = hashToken(rawToken);
 
     let tokenUUID;
     let exists;
+
     do {
       tokenUUID = generateShortId(9);
       exists = await QuoteAccessToken.findByUUID(tokenUUID);
@@ -536,24 +828,25 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     await QuoteAccessToken.create({
       quote_uuid: finalQuote.uuid,
       token_hash,
-      expires_at: new Date(finalQuote.expiry_end).toISOString(), // token expires with the quote
-      uuid: tokenUUID,
+      expires_at: new Date(finalQuote.expiry_end).toISOString(),
+      uuid: tokenUUID
     });
 
-    console.log({finalQuote})
     const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
-    // ==============================
+
     // Email Dispatch
-    // ==============================
     await sendQuoteToClient({
       to: finalQuote.contact_email,
       subject: "Your Quote is Ready",
       data: {
         quoteUUID: finalQuote.uuid,
-        name: formatFullName(finalQuote.contact_first_name, finalQuote.contact_last_name),
+        name: formatFullName(
+          finalQuote.contact_first_name,
+          finalQuote.contact_last_name
+        ),
         mobile: finalQuote.contact_mobile ?? "",
         landline: finalQuote.contact_landline ?? "",
-        message: finalQuote.message ?? "-",
+        message: finalQuote.message ?? "",
         email: finalQuote.contact_email,
         subtotal: finalQuote.subtotal_amount,
         gst: finalQuote.gst_amount,
@@ -575,9 +868,6 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
   } catch (error) {
     console.error(error);
 
-    // ------------------------------
-    // Snapshot rollback
-    // ------------------------------
     if (quoteSnapshot) {
       try {
         await Quote.updateByUUID(uuid, quoteSnapshot);
@@ -585,17 +875,13 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
         console.error("Database rollback failed:", rollbackError);
       }
     }
-        // ------------------------------
-    // Quote token rollback
-    // ------------------------------
+
     try {
       await QuoteAccessToken.revokeAllForQuote(uuid);
     } catch (e) {
       console.error("Token rollback failed:", e);
     }
-    // ------------------------------
-    // Storage rollback
-    // ------------------------------
+
     if (filePath) {
       try {
         await supabase.storage
@@ -611,6 +897,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     });
   }
 };
+
 
 // export const updateQuoteByUUIDEmployee = async (req, res) => {
 //     const { uuid } = req.params;

@@ -1041,6 +1041,7 @@ export async function dispatchQuoteToClient(quote) {
 //     }
 //   });
 // };
+
 export const generateQuotePDF = async (quote, customer = null, imageLogo = null) => {
 
   return new Promise((resolve, reject) => {
@@ -1063,26 +1064,55 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
       // ---------------------------
       // Brand Header
       // ---------------------------
+      const headerHeight = 120;
+      const headerY = 0;
 
+      doc.rect(0, headerY, doc.page.width, headerHeight)
+        .fill("#14532d");
+
+      doc.fillColor("white");
       doc.moveDown(0.5);
       doc.fontSize(28);
 
       doc.text("H", { continued: true });
 
-      if (imageLogo) {
-        doc.image(imageLogo, doc.x + 5, doc.y - 28, {
-          width: 32,
-          height: 32
+        if (imageLogo) {
+
+        const imgWidth = 32;
+        const imgHeight = 32;
+
+        const pageCenter = doc.page.width / 2;
+
+        const imgX = pageCenter - imgWidth / 2 + imgWidth * (2 / 3);
+        const imgY = 40;
+
+        doc.image(imageLogo, imgX, imgY, {
+          width: imgWidth,
+          height: imgHeight
         });
 
-        doc.text("ppy Lawns", {
-          continued: false,
-          align: "center"
-        });
+        const textX = pageCenter + pageCenter * 0.3;
 
+        doc.fillColor("white").fontSize(22);
+
+        doc.text("ppy Lawns", textX, imgY + imgHeight / 4);
       } else {
-        doc.text("ppy Lawns", { align: "center" });
+              doc.text("ppy Lawns", { align: "center" });
       }
+      // if (imageLogo) {
+      //   doc.image(imageLogo, doc.x + 5, doc.y - 28, {
+      //     width: 32,
+      //     height: 32
+      //   });
+
+      //   doc.text("ppy Lawns", {
+      //     continued: false,
+      //     align: "center"
+      //   });
+
+      // } else {
+      //   doc.text("ppy Lawns", { align: "center" });
+      // }
 
       doc.moveDown(0.5);
 
@@ -1202,6 +1232,36 @@ export const generateQuotePDF = async (quote, customer = null, imageLogo = null)
 
         y += 22;
       });
+
+      // ---------------------------
+    // Footer Section
+    // ---------------------------
+    const pageHeight = doc.page.height || 792;
+    const footerY = pageHeight - 80;
+
+    doc.fontSize(10).fillColor("black");
+
+    doc.text(
+      "Thank you for choosing Happy Lawns",
+      50,
+      footerY,
+      {
+        align: "center",
+        width: 500
+      }
+    );
+
+    doc.moveDown(0.5);
+
+    doc.text(
+      "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+      50,
+      footerY + 15,
+      {
+        align: "center",
+        width: 500
+      }
+    );
 
       doc.end();
 
