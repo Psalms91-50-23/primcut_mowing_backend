@@ -1046,10 +1046,9 @@ export async function dispatchQuoteToClient(quote) {
 // };
 
 export const generateQuotePDF = async (quote, customer = null) => {
-
   const headerImagePath = path.join(
     process.cwd(),
-    "assets/pdf/happy-lawns-header.png"
+    "assets/pdf/happy-house-header.png"
   );
 
   let headerBuffer = null;
@@ -1061,62 +1060,45 @@ export const generateQuotePDF = async (quote, customer = null) => {
   }
 
   return new Promise((resolve, reject) => {
-
     try {
-
       const doc = new PDFDocument({
         margin: 50,
-        lineGap: 3
+        lineGap: 3,
       });
 
       const chunks = [];
 
-      doc.on("data", chunk => chunks.push(chunk));
+      doc.on("data", (chunk) => chunks.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      const customerName = `${capitalize(quote.contact_first_name) || ""} ${
-        capitalize(quote.contact_last_name) || ""
-      }`.trim();
+      const customerName = `${capitalize(
+        quote.contact_first_name
+      ) || ""} ${capitalize(quote.contact_last_name) || ""}`.trim();
 
       // ======================================================
-      // HEADER IMAGE (ABSOLUTE TOP)
+      // HEADER IMAGE
       // ======================================================
 
       const HEADER_HEIGHT = 120;
 
       if (headerBuffer) {
-        doc.image(
-          headerBuffer,
-          0,
-          0,
-          {
-            width: doc.page.width,
-            height: HEADER_HEIGHT,
-            fit: [doc.page.width, HEADER_HEIGHT]
-          }
-        );
+        doc.image(headerBuffer, 0, 0, {
+          width: doc.page.width,
+          height: HEADER_HEIGHT,
+        });
       }
 
-      // Move cursor below header band
       doc.y = HEADER_HEIGHT + 20;
 
       // ======================================================
-      // TITLE SECTION
+      // TITLE SECTION (CENTERED)
       // ======================================================
 
       doc.fontSize(14).fillColor("black");
 
-      doc.text("QUOTE CONFIRMATION", {
-        align: "center"
-      });
-
-      doc.moveDown(0.5);
-
-      doc.fontSize(11);
-
       doc.text(`Quote Number: ${quote.uuid || "-"}`, {
-        align: "center"
+        align: "center",
       });
 
       doc.text(
@@ -1130,84 +1112,137 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       if (quote.responded_at) {
         doc.text(
-          `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`,
+          `Date Accepted: ${new Date(
+            quote.responded_at
+          ).toLocaleDateString()}`,
           { align: "center" }
         );
       }
 
+      doc.moveDown(1.5);
+
       // ======================================================
-      // BUSINESS DETAILS BLOCK
+      // TWO COLUMN LAYOUT
+      // LEFT: CLIENT
+      // RIGHT: EMPLOYER
       // ======================================================
 
-      doc.moveDown(1);
+      const pageLeft = doc.page.margins.left;
+      const pageRight = doc.page.width - doc.page.margins.right;
+      const contentWidth = pageRight - pageLeft;
 
-      doc.fontSize(11).text(`NZBN: ${process.env.NZBN || "-"}`, {
-        align: "center"
+      const gap = 20;
+      const leftColWidth = Math.floor(contentWidth * 0.58);
+      const rightColWidth = contentWidth - leftColWidth - gap;
+
+      const leftX = pageLeft;
+      const rightX = leftX + leftColWidth + gap;
+
+      const blockTopY = doc.y;
+
+      // -----------------------------
+      // RIGHT COLUMN (Employer)
+      // -----------------------------
+
+      doc.fontSize(11).fillColor("black");
+
+      doc.text(`NZBN: ${process.env.NZBN || "-"}`, rightX, blockTopY, {
+        width: rightColWidth,
+        align: "right",
       });
 
       doc.text(`GST Number: ${process.env.GST || "-"}`, {
-        align: "center"
+        width: rightColWidth,
+        align: "right",
       });
 
       doc.text(`Phone: ${process.env.CONTACT_NUM || "-"}`, {
-        align: "center"
+        width: rightColWidth,
+        align: "right",
       });
 
       doc.text(`Email: ${process.env.CONTACT_EMAIL || "-"}`, {
-        align: "center"
+        width: rightColWidth,
+        align: "right",
       });
 
       doc.text(`Address: ${process.env.CONTACT_ADDRESS || "-"}`, {
-        align: "center"
+        width: rightColWidth,
+        align: "right",
       });
 
-      doc.moveDown(1);
+      const rightBottomY = doc.y;
 
-      // ======================================================
-      // CLIENT DETAILS
-      // ======================================================
+      // -----------------------------
+      // LEFT COLUMN (Client)
+      // -----------------------------
 
-      doc.fontSize(13).text("Client Details");
+      doc.y = blockTopY;
+
+      doc.fontSize(13).fillColor("black").text("Client Details", leftX, doc.y, {
+        width: leftColWidth,
+      });
+
       doc.moveDown(0.5);
 
       doc.fontSize(11);
 
-      doc.text(`Name: ${customerName || "-"}`);
-      doc.text(`Email: ${quote.contact_email || "-"}`);
-      doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
-      doc.text(`Landline: ${quote.contact_landline || "-"}`);
+      doc.text(`Name: ${customerName || "-"}`, leftX, doc.y, {
+        width: leftColWidth,
+      });
+
+      doc.text(`Email: ${quote.contact_email || "-"}`, {
+        width: leftColWidth,
+      });
+
+      doc.text(`Mobile: ${quote.contact_mobile || "-"}`, {
+        width: leftColWidth,
+      });
+
+      doc.text(`Landline: ${quote.contact_landline || "-"}`, {
+        width: leftColWidth,
+      });
 
       doc.moveDown(1);
 
-      doc.fontSize(13).text("Service Address");
+      doc.fontSize(13).text("Service Address", leftX, doc.y, {
+        width: leftColWidth,
+      });
+
       doc.moveDown(0.3);
 
-      doc.fontSize(11).text(quote.address || "-");
+      doc.fontSize(11).text(quote.address || "-", leftX, doc.y, {
+        width: leftColWidth,
+      });
+
+      const leftBottomY = doc.y;
+
+      // Move below tallest column
+      doc.y = Math.max(leftBottomY, rightBottomY);
 
       doc.moveDown(1);
 
-      doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-
+      // Divider
+      doc.moveTo(pageLeft, doc.y).lineTo(pageRight, doc.y).stroke();
       doc.moveDown(1);
 
       // ======================================================
       // SCOPE TABLE
       // ======================================================
 
-      doc.fontSize(13).text("Scope of Work");
+      doc.fontSize(13).fillColor("black").text("Scope of Work");
       doc.moveDown(0.6);
 
       const tableStartY = doc.y + 10;
 
-      const colService = 50;
-      const colQty = 250;
-      const colUnitPrice = 330;
-      const colTotal = 430;
+      const colService = pageLeft;
+      const colQty = pageLeft + 200;
+      const colUnitPrice = pageLeft + 280;
+      const colTotal = pageLeft + 380;
 
-      doc.rect(50, tableStartY, 500, 22).fill("#f0fdf4");
+      doc.rect(pageLeft, tableStartY, contentWidth, 22).fill("#f0fdf4");
 
-      doc.fillColor("black");
-      doc.fontSize(10);
+      doc.fillColor("black").fontSize(10);
 
       doc.text("Service", colService, tableStartY + 6);
       doc.text("Qty", colQty, tableStartY + 6);
@@ -1216,18 +1251,14 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       let y = tableStartY + 28;
 
-      quote.services?.forEach(service => {
-
+      quote.services?.forEach((service) => {
         const lineTotal =
-          (service.quantity || 1) *
-          (service.unit_price || 0);
+          (service.quantity || 1) * (service.unit_price || 0);
 
-        doc.fontSize(10);
+        doc.fontSize(10).fillColor("black");
 
         doc.text(
-          service.label ||
-          service.description ||
-          "Service",
+          service.label || service.description || "Service",
           colService,
           y
         );
@@ -1240,11 +1271,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
           y
         );
 
-        doc.text(
-          `$${lineTotal.toFixed(2)}`,
-          colTotal,
-          y
-        );
+        doc.text(`$${lineTotal.toFixed(2)}`, colTotal, y);
 
         y += 22;
       });
@@ -1255,21 +1282,14 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.moveDown(2);
 
-      doc.fontSize(11);
+      doc.fontSize(11).fillColor("black");
+      doc.text(`Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`);
 
-      doc.text(
-        `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
-      );
-
-      doc.text(
-        `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
-      );
+      doc.text(`GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`);
 
       doc.moveDown(0.5);
 
-      doc.fontSize(14).text(
-        `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
-      );
+      doc.fontSize(12).text(`TOTAL: $${(quote.total_amount || 0).toFixed(2)}`);
 
       doc.moveDown(1);
 
@@ -1281,33 +1301,303 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.fontSize(10).fillColor("black");
 
-      doc.text(
-        "Thank you for choosing Happy Lawns",
-        50,
-        FOOTER_Y,
-        {
-          align: "center",
-          width: 500
-        }
-      );
+      doc.text("Thank you for choosing Happy Lawns", pageLeft, FOOTER_Y, {
+        align: "center",
+        width: contentWidth,
+      });
 
       doc.text(
         "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
-        50,
+        pageLeft,
         FOOTER_Y + 15,
         {
           align: "center",
-          width: 500
+          width: contentWidth,
         }
       );
 
-      doc.end();
+      // ======================================================
+      // BOTTOM GREEN BAR (5px) - Tailwind bg-green-900 (#14532d)
+      // ======================================================
 
+      const GREEN_900 = "#14532d"; // Tailwind bg-green-900
+      const BAR_HEIGHT = 5;
+
+      doc.save();
+      doc
+        .fillColor(GREEN_900)
+        .rect(0, doc.page.height - BAR_HEIGHT, doc.page.width, BAR_HEIGHT)
+        .fill();
+      doc.restore();
+
+      doc.end();
     } catch (err) {
       reject(err);
     }
   });
 };
+
+// export const generateQuotePDF = async (quote, customer = null) => {
+
+//   const headerImagePath = path.join(
+//     process.cwd(),
+//     "assets/pdf/happy-house-header.png"
+//   );
+
+//   let headerBuffer = null;
+
+//   try {
+//     headerBuffer = fs.readFileSync(headerImagePath);
+//   } catch (err) {
+//     console.error("Header asset load failed:", err.message);
+//   }
+
+//   return new Promise((resolve, reject) => {
+
+//     try {
+
+//       const doc = new PDFDocument({
+//         margin: 50,
+//         lineGap: 3
+//       });
+
+//       const chunks = [];
+
+//       doc.on("data", chunk => chunks.push(chunk));
+//       doc.on("end", () => resolve(Buffer.concat(chunks)));
+//       doc.on("error", reject);
+
+//       const customerName = `${capitalize(quote.contact_first_name) || ""} ${
+//         capitalize(quote.contact_last_name) || ""
+//       }`.trim();
+
+//       // ======================================================
+//       // HEADER IMAGE (ABSOLUTE TOP)
+//       // ======================================================
+
+//       const HEADER_HEIGHT = 120;
+
+//       if (headerBuffer) {
+//         doc.image(
+//           headerBuffer,
+//           0,
+//           0,
+//           {
+//             width: doc.page.width,
+//             height: HEADER_HEIGHT,
+//             fit: [doc.page.width, HEADER_HEIGHT]
+//           }
+//         );
+//       }
+
+//       // Move cursor below header band
+//       doc.y = HEADER_HEIGHT + 20;
+
+//       // ======================================================
+//       // TITLE SECTION
+//       // ======================================================
+
+//       doc.fontSize(14).fillColor("black");
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Quote Number: ${quote.uuid || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.text(
+//         `Date Issued: ${
+//           quote.created_at
+//             ? new Date(quote.created_at).toLocaleDateString()
+//             : "-"
+//         }`,
+//         { align: "center" }
+//       );
+
+//       if (quote.responded_at) {
+//         doc.text(
+//           `Date Accepted: ${new Date(quote.responded_at).toLocaleDateString()}`,
+//           { align: "center" }
+//         );
+//       }
+
+//       // ======================================================
+//       // BUSINESS DETAILS BLOCK
+//       // ======================================================
+
+//       doc.moveDown(1);
+
+//       doc.fontSize(11).text(`NZBN: ${process.env.NZBN || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.text(`GST Number: ${process.env.GST || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.text(`Phone: ${process.env.CONTACT_NUM || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.text(`Email: ${process.env.CONTACT_EMAIL || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.text(`Address: ${process.env.CONTACT_ADDRESS || "-"}`, {
+//         align: "center"
+//       });
+
+//       doc.moveDown(1);
+
+//       // ======================================================
+//       // CLIENT DETAILS
+//       // ======================================================
+//       doc.text("QUOTE CONFIRMATION", {
+//         align: "center"
+//       });
+//       doc.fontSize(13).text("Client Details");
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(11);
+
+//       doc.text(`Name: ${customerName || "-"}`);
+//       doc.text(`Email: ${quote.contact_email || "-"}`);
+//       doc.text(`Mobile: ${quote.contact_mobile || "-"}`);
+//       doc.text(`Landline: ${quote.contact_landline || "-"}`);
+
+//       doc.moveDown(1);
+
+//       doc.fontSize(13).text("Service Address");
+//       doc.moveDown(0.3);
+
+//       doc.fontSize(11).text(quote.address || "-");
+
+//       doc.moveDown(1);
+
+//       doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+
+//       doc.moveDown(1);
+
+//       // ======================================================
+//       // SCOPE TABLE
+//       // ======================================================
+
+//       doc.fontSize(13).text("Scope of Work");
+//       doc.moveDown(0.6);
+
+//       const tableStartY = doc.y + 10;
+
+//       const colService = 50;
+//       const colQty = 250;
+//       const colUnitPrice = 330;
+//       const colTotal = 430;
+
+//       doc.rect(50, tableStartY, 500, 22).fill("#f0fdf4");
+
+//       doc.fillColor("black");
+//       doc.fontSize(10);
+
+//       doc.text("Service", colService, tableStartY + 6);
+//       doc.text("Qty", colQty, tableStartY + 6);
+//       doc.text("Unit Price", colUnitPrice, tableStartY + 6);
+//       doc.text("Line Total", colTotal, tableStartY + 6);
+
+//       let y = tableStartY + 28;
+
+//       quote.services?.forEach(service => {
+
+//         const lineTotal =
+//           (service.quantity || 1) *
+//           (service.unit_price || 0);
+
+//         doc.fontSize(10);
+
+//         doc.text(
+//           service.label ||
+//           service.description ||
+//           "Service",
+//           colService,
+//           y
+//         );
+
+//         doc.text((service.quantity || 1).toString(), colQty, y);
+
+//         doc.text(
+//           `$${(service.unit_price || 0).toFixed(2)}`,
+//           colUnitPrice,
+//           y
+//         );
+
+//         doc.text(
+//           `$${lineTotal.toFixed(2)}`,
+//           colTotal,
+//           y
+//         );
+
+//         y += 22;
+//       });
+
+//       // ======================================================
+//       // PRICING SUMMARY
+//       // ======================================================
+
+//       doc.moveDown(2);
+
+//       doc.fontSize(11);
+
+//       doc.text(
+//         `Subtotal: $${(quote.subtotal_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.text(
+//         `GST (15%): $${(quote.gst_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown(0.5);
+
+//       doc.fontSize(12).text(
+//         `TOTAL: $${(quote.total_amount || 0).toFixed(2)}`
+//       );
+
+//       doc.moveDown(1);
+
+//       // ======================================================
+//       // FOOTER
+//       // ======================================================
+
+//       const FOOTER_Y = doc.page.height - 80;
+
+//       doc.fontSize(10).fillColor("black");
+
+//       doc.text(
+//         "Thank you for choosing Happy Lawns",
+//         50,
+//         FOOTER_Y,
+//         {
+//           align: "center",
+//           width: 500
+//         }
+//       );
+
+//       doc.text(
+//         "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+//         50,
+//         FOOTER_Y + 15,
+//         {
+//           align: "center",
+//           width: 500
+//         }
+//       );
+
+//       doc.end();
+
+//     } catch (err) {
+//       reject(err);
+//     }
+//   });
+// };
 
 //good but no summary
 // export const generateQuotePDF = async (quote, customer = null) => {
