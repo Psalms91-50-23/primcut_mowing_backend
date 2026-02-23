@@ -107,8 +107,7 @@ export const revokeAll = async (req, res) => {
 export const viewPublicQuote = async (req, res) => {
   const { uuid } = req.params;
   const { token } = req.query;
-  console.log({uuid}, " public view backend")
-  console.log({token}, " public view backend token")
+
   if (!uuid || !token) {
       return res.status(400).json({ error: "Quote UUID and token are required" });
     }
