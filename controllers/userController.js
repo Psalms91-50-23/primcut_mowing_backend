@@ -219,7 +219,6 @@ export const login = async (req, res) => {
 
   const { email, password, recaptchaToken } = req.body;
 
-
   console.log("Attempting login with:", { email, password });
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
@@ -1300,7 +1299,7 @@ export const createUserEmptyEmployee = async (req, res) => {
       await supabase.auth.admin.generateLink({
         type: "invite",
         email: normalizedEmail,
-        options: { redirectTo: `${process.env.FRONTEND_URL}/user/set-password` }
+        options: { redirectTo: `${process.env.FRONTEND_URL_HAPPY_LAWNS}/user/set-password` }
       });
 
     if (supabaseError) {

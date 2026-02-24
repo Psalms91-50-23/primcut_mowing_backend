@@ -444,14 +444,67 @@ export default class Quote {
         return data;
     }
 
-    static async dispatchQuote(uuid, payload) {
-        if (!uuid) throw new Error("Quote UUID is required");
+    // static async dispatchQuote(uuid, payload, pdfBuffer) {
+    //     if (!uuid) throw new Error("Quote UUID is required");
 
-        const { data, error } = await supabase
+    //     const { data, error } = await supabase
+    //         .from("quotes")
+    //         .update({
+    //         ...payload,
+    //         quote_pdf_version: (payload.quote_pdf_version || 0) + 1,
+    //         quote_sent_at: new Date().toISOString(),
+    //         is_quote_sent_to_client: true,
+    //         status: "sent",
+    //         updated_at: new Date().toISOString()
+    //         })
+    //         .eq("uuid", uuid)
+    //         .select("*")
+    //         .single();
+
+    //     if (error) throw new Error(error.message);
+
+    //     return data;
+    // }
+
+    static async dispatchQuote(uuid, payload, pdfBuffer) {
+        if (!uuid) throw new Error("Quote UUID is required");
+        if (!pdfBuffer) throw new Error("PDF buffer is required");
+
+        // 1) Get current quote to determine next version
+        const { data: existing, error: fetchError } = await supabase
+            .from("quotes")
+            .select("uuid, quote_pdf_version")
+            .eq("uuid", uuid)
+            .single();
+
+        if (fetchError) throw new Error(fetchError.message);
+        if (!existing) throw new Error("Quote not found");
+
+        const currentVersion = Number(existing.quote_pdf_version ?? 1);
+        const nextVersion = currentVersion + 1;
+
+        // 2) Upload PDF to storage
+        const filePath = `quotes/${uuid}/quote-v${nextVersion}.pdf`;
+
+        const { error: uploadError } = await supabase.storage
+            .from("quotes-pdf")
+            .upload(filePath, pdfBuffer, {
+            contentType: "application/pdf",
+            upsert: true
+            });
+
+        if (uploadError) throw new Error(uploadError.message);
+
+        // 3) Store PATH (recommended). If you want URL instead, see note below.
+        const quote_pdf_url = filePath;
+
+        // 4) Update quote record
+        const { data: updated, error: updateError } = await supabase
             .from("quotes")
             .update({
             ...payload,
-            quote_pdf_version: (payload.quote_pdf_version || 0) + 1,
+            quote_pdf_url,
+            quote_pdf_version: nextVersion,
             quote_sent_at: new Date().toISOString(),
             is_quote_sent_to_client: true,
             status: "sent",
@@ -461,10 +514,12 @@ export default class Quote {
             .select("*")
             .single();
 
-        if (error) throw new Error(error.message);
+        if (updateError) throw new Error(updateError.message);
 
-        return data;
-        }
+        // Optional: return filePath too if you want rollback deletion support
+        // return updated;
+        return { updated, filePath };
+    }
 }
 
 

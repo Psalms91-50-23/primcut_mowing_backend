@@ -118,7 +118,23 @@ class QuoteAccessToken {
 
         if (error) throw new Error(error.message);
     }
+    
+    static async findValidToken({ quote_uuid, token_hash }) {
+        const nowIso = new Date().toISOString();
 
+        const { data, error } = await supabase
+            .from("quote_access_tokens")
+            .select("*")
+            .eq("quote_uuid", quote_uuid)
+            .eq("token_hash", token_hash)
+            .gt("expires_at", nowIso)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) throw new Error(`Error finding valid token: ${error.message}`);
+        return data;
+    }
 }
 
 export default QuoteAccessToken;

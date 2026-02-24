@@ -769,7 +769,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       contact_first_name,
       contact_last_name,
       employer_message: employer_message ?? "",
-      quote_pdf_url: null,
+      // quote_pdf_url: null,
       quote_version_reason: "employee_sent"
     };
 
@@ -778,7 +778,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // ==============================
 
     const logoUrl =
-      "https://happy-lawns.vercel.app/images/seedream-image.png";
+      `${process.env.FRONTEND_URL_HAPPY_LAWNS}/images/happy-house-1.png`;
 
     let logoBuffer = null;
 
@@ -803,14 +803,15 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     // Dispatch Pipeline (Model Handles Version + Path)
     // ==============================
 
-    const finalQuote = await Quote.dispatchQuote(
+    const result = await Quote.dispatchQuote(
       uuid,
       {
         ...updatePayload
       },
       pdfBuffer
     );
-
+    const finalQuote = result.updated;
+    filePath = result.filePath;
     // Token Rotation
     await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
 

@@ -236,8 +236,11 @@ export const verifyRecaptcha = async (token, version) => {
   }
 };
 
-export function hashToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
+export function hashToken(rawToken) {
+  return crypto
+    .createHash("sha256")
+    .update(String(rawToken), "utf8")
+    .digest("hex");
 }
 
 // export async function createQuoteAccessToken(quote) {
@@ -291,6 +294,7 @@ export function hashToken(token) {
 
 //   return rawToken;
 // }
+
 
 export async function dispatchQuoteToClient(quote) {
   // Revoke any previous tokens for this quote
@@ -1066,11 +1070,16 @@ export const generateQuotePDF = async (quote, customer = null) => {
         lineGap: 3,
       });
 
+      const pageLeft = doc.page.margins.left;
+      const pageRight = doc.page.width - doc.page.margins.right;
+      const contentWidth = pageRight - pageLeft;
       const chunks = [];
 
       doc.on("data", (chunk) => chunks.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
+
+
 
       const customerName = `${capitalize(
         quote.contact_first_name
@@ -1080,7 +1089,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
       // HEADER IMAGE
       // ======================================================
 
-      const HEADER_HEIGHT = 120;
+      const HEADER_HEIGHT = 70;
 
       if (headerBuffer) {
         doc.image(headerBuffer, 0, 0, {
@@ -1097,8 +1106,13 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.fontSize(14).fillColor("black");
 
-      doc.text(`Quote Number: ${quote.uuid || "-"}`, {
-        align: "center",
+      doc.text(`Quote Confirmation`, pageLeft, doc.y, {
+        align: "left",
+      });
+
+      doc.fontSize(11).fillColor("black");
+      doc.text(`Quote Number: ${quote.uuid || "-"}`, pageLeft, doc.y,{
+        align: "left",
       });
 
       doc.text(
@@ -1107,7 +1121,8 @@ export const generateQuotePDF = async (quote, customer = null) => {
             ? new Date(quote.created_at).toLocaleDateString()
             : "-"
         }`,
-        { align: "center" }
+        pageLeft, doc.y,
+        { align: "left" }
       );
 
       if (quote.responded_at) {
@@ -1115,7 +1130,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
           `Date Accepted: ${new Date(
             quote.responded_at
           ).toLocaleDateString()}`,
-          { align: "center" }
+          { align: "left" }
         );
       }
 
@@ -1127,9 +1142,9 @@ export const generateQuotePDF = async (quote, customer = null) => {
       // RIGHT: EMPLOYER
       // ======================================================
 
-      const pageLeft = doc.page.margins.left;
-      const pageRight = doc.page.width - doc.page.margins.right;
-      const contentWidth = pageRight - pageLeft;
+      // const pageLeft = doc.page.margins.left;
+      // const pageRight = doc.page.width - doc.page.margins.right;
+      // const contentWidth = pageRight - pageLeft;
 
       const gap = 20;
       const leftColWidth = Math.floor(contentWidth * 0.58);
@@ -1242,7 +1257,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.rect(pageLeft, tableStartY, contentWidth, 22).fill("#f0fdf4");
 
-      doc.fillColor("black").fontSize(10);
+      doc.fillColor("black").fontSize(12);
 
       doc.text("Service", colService, tableStartY + 6);
       doc.text("Qty", colQty, tableStartY + 6);
@@ -1321,7 +1336,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
       // ======================================================
 
       const GREEN_900 = "#14532d"; // Tailwind bg-green-900
-      const BAR_HEIGHT = 5;
+      const BAR_HEIGHT = 10;
 
       doc.save();
       doc

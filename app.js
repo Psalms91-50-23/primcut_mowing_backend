@@ -23,16 +23,14 @@ const app = express();
 
 // Determine allowed CORS origins
 // let allowedOrigins = [];
-// if (process.env.NODE_ENV === "production") {
-//   allowedOrigins.push(process.env.FRONTEND_HAPPY_LAWNS);
-// } else {
-//   allowedOrigins.push("http://localhost:3000");
-// }
-//for developtment
+
 const allowedOrigins = [
-    `${process.env.CLIENT_URL}`,
-    `${process.env.FRONTEND_URL}`
-];
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL_HAPPY_LAWNS
+]
+  .filter(Boolean)
+  .filter((v, i, arr) => arr.indexOf(v) === i);
 
 app.use(cookieParser());
 app.use(express.json());

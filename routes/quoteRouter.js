@@ -25,13 +25,15 @@ import {
     getLimitedQuoteByUUID,
     autoExpireQuote
 } from "../controllers/quoteController.js";
+import { viewQuotePdf } from "../controllers/viewQuotePdfController.js";
 
 import {
   viewPublicQuote
 } from "../controllers/quoteAccessTokenController.js"
 
 const router = express.Router();
-
+//PDF route for quote
+router.get("/quotes/:uuid/pdf", viewQuotePdf);
 // GET all quotes
 router.get("/all", getAllQuotes);
 
