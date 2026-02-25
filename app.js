@@ -34,7 +34,7 @@ const allowedOrigins = [
 
 app.use(cookieParser());
 app.use(express.json());
-console.log({allowedOrigins})
+// console.log({allowedOrigins})
 // Enable CORS
 app.use(cors({
   origin: allowedOrigins,

@@ -3,8 +3,6 @@ import Customer from '../models/Customer.js';
 import Employee from '../models/Employee.js';
 import UserLogin from '../models/UserLogin.js';
 import jwt from 'jsonwebtoken';
-import UserRefreshToken from '../models/UserRefreshToken .js';
-import UserAccessToken from '../models/UserAccessToken.js';
 import crypto from 'crypto';
 import { generateShortId, formatFullName, EMAIL_TOKEN_EXPIRES_IN, getClientIp } from '../util/util.js';
 import { supabase, supabaseNonAdmin } from '../config/db.js';
@@ -413,7 +411,6 @@ export const login = async (req, res) => {
 // };
 export const logout = async (req, res) => {
   try {
-    console.log("Logging out user");
 
     const accessToken = req.cookies?.accessToken;
 
@@ -545,8 +542,7 @@ export const getCurrentUser = async (req, res) => {
   try {
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
-    console.log({accessToken})
-    console.log({refreshToken})
+
     if (!accessToken) {
       return res.status(401).json({ error: "Missing access token" });
     }
@@ -1176,10 +1172,8 @@ export const resetPassword = async (req, res) => {
 // };
 
 export const checkCookiesExists = async (req, res) => {
-    const accessToken = req.cookies.accessToken;
-    const refreshToken = req.cookies.refreshToken;
-    console.log({accessToken}, {refreshToken}, " in check cookies function")
-    console.log({refreshToken}, " refresh token in check cookies function")
+  const accessToken = req.cookies.accessToken;
+  const refreshToken = req.cookies.refreshToken;
 
   if (!accessToken || !refreshToken) {
     return res.status(401).json({ loggedIn: false });

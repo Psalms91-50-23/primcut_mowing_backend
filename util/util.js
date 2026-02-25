@@ -975,7 +975,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
 
       doc.fontSize(10).fillColor("black");
 
-      doc.text("Thank you for choosing Happy Lawns", pageLeft, FOOTER_Y, {
+      doc.text("Thank you for choosing Happy Property", pageLeft, FOOTER_Y, {
         align: "center",
         width: contentWidth,
       });
