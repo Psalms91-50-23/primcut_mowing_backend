@@ -981,7 +981,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
       });
 
       doc.text(
-        "For enquiries please contact support@happylawns.co.nz | 021 XXX XXXX",
+        "For enquiries please contact support@happyproperty.co.nz | 021 XXX XXXX",
         pageLeft,
         FOOTER_Y + 15,
         {
