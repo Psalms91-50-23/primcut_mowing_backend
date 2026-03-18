@@ -37,6 +37,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL_HAPPY_LAWNS
 ].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i);
 
+console.log({allowedOrigins})
 app.use(cookieParser());
 app.use(express.json());
 // console.log({allowedOrigins})
