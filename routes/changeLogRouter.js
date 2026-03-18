@@ -2,7 +2,7 @@ import express from 'express';
 import {
     getAllChangeLogs,
     getLogsByEntity
-} from '../controllers/logChangeController.js';
+} from '../controllers/changeLogController.js';
 
 const router = express.Router();
 

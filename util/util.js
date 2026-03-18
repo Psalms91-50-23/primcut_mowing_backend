@@ -1,7 +1,7 @@
 
 import crypto from 'crypto';
 const CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz";
-const DEFAULT_LENGTH = 9;
+const DEFAULT_LENGTH = 8;
 import jwt from 'jsonwebtoken';
 import QuoteAccessToken from '../models/QuoteAccessToken.js';
 import { RecaptchaEnterpriseServiceClient } from "@google-cloud/recaptcha-enterprise";
@@ -87,7 +87,7 @@ export const obfuscateEmail = (email) => {
   const hiddenLength = local.length - visibleStart.length - visibleEnd.length;
 
   return `${visibleStart}${"*".repeat(Math.max(hiddenLength, 3))}${visibleEnd}@${domain}`;
-}
+};
 
 // export function normalizeNZPhone(phone) {
 //     phone = phone.replace(/\D/g, "");
@@ -103,6 +103,23 @@ export const obfuscateEmail = (email) => {
 
 //     return phone;
 // }
+
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const normalizedEmail = (email) => {
+  return email?.trim().toLowerCase() || null;
+};
+
+export const generatePrefixedId = (prefix, size = DEFAULT_LENGTH) => {
+    let id = "";
+    const bytes = crypto.randomBytes(size);
+
+    for (let i = 0; i < size; i++) {
+        id += CHARACTERS[bytes[i] % CHARACTERS.length];
+    }
+
+    return prefix + id;
+};
 
 export const generateShortId = (size = DEFAULT_LENGTH) => {
     let shortUUID = "";
@@ -995,7 +1012,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
       // ======================================================
 
       const GREEN_900 = "#14532d";
-      const BAR_HEIGHT = 10;
+      const BAR_HEIGHT = 5;
 
       doc.save();
       doc

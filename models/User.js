@@ -62,12 +62,26 @@ class User {
     return data;
   }
 
-  // Find user by email
-  static async findByEmail(email) {
+  static async findByAuthUserId(authUserId) {
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email)
+      .eq('auth_user_id', authUserId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
+  // Find user by email
+  static async findByEmail(email) {
+    console.log({email})
+    const normalizedEmail = email?.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', normalizedEmail)
       .is('deleted_at', null)
       .maybeSingle();
 
@@ -181,18 +195,7 @@ class User {
       
     }
 
-  static async findByAuthUserId(authUserId) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('auth_user_id', authUserId)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (error) throw new Error(error.message);
-    return data;
-  }
-
 }
+
 
 export default User;

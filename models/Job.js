@@ -1,6 +1,88 @@
 import supabase from '../config/db.js';
 
+function clampInt(n, fallback, min, max) {
+  const x = parseInt(String(n), 10);
+  if (Number.isNaN(x)) return fallback;
+  return Math.min(Math.max(x, min), max);
+}
+
+function buildSearchOr(terms, columns) {
+  const filters = [];
+
+  for (const rawTerm of terms) {
+    const term = String(rawTerm || "").trim().replace(/,/g, "");
+    if (!term) continue;
+
+    for (const column of columns) {
+      filters.push(`${column}.ilike.%${term}%`);
+    }
+  }
+
+  return filters.join(",");
+}
+
 class Job {
+
+  static async searchSummary(query, limit = 10) {
+    const terms = String(query || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (terms.length === 0) return [];
+
+    const orFilter = buildSearchOr(terms, [
+      "uuid",
+      // "status",
+      "job_address",
+    ]);
+
+    const { data, error } = await supabase
+    .from("jobs")
+    .select(`
+        uuid,
+        status,
+        job_address,
+        scheduled_at,
+        total_amount,
+        created_at,
+        quote:quotes (
+          uuid,
+          contact_first_name,
+          contact_last_name,
+          contact_email
+        )
+      `)
+      .or(orFilter)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    const jobs = data || [];
+
+    const loweredTerms = terms.map((t) => t.toLowerCase());
+
+    const filtered = jobs.filter((job) => {
+      const quote = job.quote || {};
+      const haystack = [
+        job.uuid,
+        // job.status,
+        job.job_address,
+        quote.uuid,
+        quote.contact_first_name,
+        quote.contact_last_name,
+        quote.contact_email,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return loweredTerms.some((term) => haystack.includes(term));
+    });
+
+    return filtered.slice(0, limit);
+  }
   // Get all jobs
   static async findAll() {
     const { data, error } = await supabase
@@ -12,40 +94,181 @@ class Job {
   }
 
   // Find job by UUID
+//   static async findByUUID(uuid) {
+//     const { data, error } = await supabase
+//       .from('jobs')
+//       .select('*')
+//       .eq('uuid', uuid)
+//       .maybeSingle();
+//     if (error) throw new Error(`Error fetching job with UUID ${uuid}: ${error.message}`);
+//     return data;
+//   }
+
   static async findByUUID(uuid) {
+    if (!uuid) throw new Error("Job UUID is required");
+
     const { data, error } = await supabase
-      .from('jobs')
-      .select('*')
-      .eq('uuid', uuid)
+      .from("jobs")
+      .select(
+        `
+          *,
+          job_recurrences:job_recurrences (
+            *
+          )
+        `
+      )
+      .eq("uuid", uuid)
+      .eq("is_deleted", false)
       .maybeSingle();
-    if (error) throw new Error(`Error fetching job with UUID ${uuid}: ${error.message}`);
+
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+
+    return {
+      ...data,
+      job_recurrences: (data.job_recurrences || []).filter((r) => r.is_deleted === false),
+    };
+  }
+
+  static async updateScheduleByUUID(uuid, updates = {}) {
+    if (!uuid) {
+      throw new Error("Job UUID is required");
+    }
+
+    const updatePayload = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.scheduled_at !== undefined) {
+      updatePayload.scheduled_at = updates.scheduled_at;
+    }
+
+    if (updates.scheduled_window_mins !== undefined) {
+      updatePayload.scheduled_window_mins = updates.scheduled_window_mins;
+    }
+
+    if (updates.scheduled_window_preset !== undefined) {
+      updatePayload.scheduled_window_preset = updates.scheduled_window_preset;
+    }
+
+    if (updates.is_recurring !== undefined) {
+      updatePayload.is_recurring = updates.is_recurring;
+    }
+
+    if (updates.recurrence_frequency !== undefined) {
+      updatePayload.recurrence_frequency = updates.recurrence_frequency;
+    }
+
+    if (updates.recurrence_interval !== undefined) {
+      updatePayload.recurrence_interval = updates.recurrence_interval;
+    }
+
+    if (updates.recurrence_end_date !== undefined) {
+      updatePayload.recurrence_end_date = updates.recurrence_end_date;
+    }
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .update(updatePayload)
+      .eq("uuid", uuid)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new Error(`Error updating job schedule: ${error.message}`);
+    }
+
     return data;
   }
 
+  
   // Create a job
-  static async createFromQuote({ quote, uuid, scheduled_at, is_recurring, recurrence_interval, recurrence_frequency, recurrence_end_date, customer_uuid }) {
-        const { data, error } = await supabase
-            .from('jobs')
-            .insert([{
-                uuid,
-                customer_uuid: customer_uuid,
-                quote_uuid: quote.uuid,
-                services: quote.services,          // JSON array ✔
-                total_amount: quote.total_amount,
-                scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
-                is_recurring,
-                recurrence_interval,
-                recurrence_frequency,
-                recurrence_end_date: recurrence_end_date ?? null,
-                status: 'scheduled',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            }])
-            .select('*')
-            .single();
+  // static async createFromQuote({ quote, uuid, scheduled_at, is_recurring, recurrence_interval, recurrence_frequency, recurrence_end_date, customer_uuid }) {
+  //       const { data, error } = await supabase
+  //           .from('jobs')
+  //           .insert([{
+  //               uuid,
+  //               customer_uuid: customer_uuid,
+  //               quote_uuid: quote.uuid,
+  //               services: quote.services,          // JSON array ✔
+  //               total_amount: quote.total_amount,
+  //               scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
+  //               is_recurring,
+  //               recurrence_interval,
+  //               recurrence_frequency,
+  //               recurrence_end_date: recurrence_end_date ?? null,
+  //               status: scheduled_at ? 'scheduled' : 'pending',
+  //               created_at: new Date().toISOString(),
+  //               updated_at: new Date().toISOString()
+  //           }])
+  //           .select('*')
+  //           .single();
 
-        if (error) throw new Error(`Error creating job: ${error.message}`);
-        return data;
+  //       if (error) throw new Error(`Error creating job: ${error.message}`);
+  //       return data;
+  //   }
+  // Create a job
+    static async createFromQuote({
+      quote,
+      uuid,
+      scheduled_at,
+      is_recurring,
+      recurrence_interval,
+      recurrence_frequency,
+      recurrence_end_date,
+      customer_uuid,
+    }) {
+      if (!quote) {
+        throw new Error("Quote is required to create a job");
+      }
+
+      const normalizedRecurrenceFrequency =
+        quote.recurrence_frequency ||
+        recurrence_frequency ||
+        "one_off";
+
+      const normalizedIsRecurring =
+        typeof is_recurring === "boolean"
+          ? is_recurring
+          : normalizedRecurrenceFrequency !== "one_off";
+
+      const normalizedRecurrenceInterval =
+        recurrence_interval ??
+        (normalizedRecurrenceFrequency === "weekly"
+          ? 1
+          : normalizedRecurrenceFrequency === "fortnightly"
+          ? 2
+          : normalizedRecurrenceFrequency === "monthly"
+          ? 1
+          : null);
+
+      const now = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from("jobs")
+        .insert([
+          {
+            uuid,
+            customer_uuid,
+            quote_uuid: quote.uuid,
+            services: quote.services ?? [],
+            total_amount: quote.total_amount ?? 0,
+            job_address: quote.address ?? null, // copy address from quote into job
+            scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
+            is_recurring: normalizedIsRecurring,
+            recurrence_interval: normalizedRecurrenceInterval,
+            recurrence_frequency: normalizedRecurrenceFrequency,
+            recurrence_end_date: recurrence_end_date ?? null,
+            status: scheduled_at ? "scheduled" : "pending",
+            created_at: now,
+            updated_at: now,
+          },
+        ])
+        .select("*")
+        .single();
+
+      if (error) throw new Error(`Error creating job: ${error.message}`);
+      return data;
     }
 
     static async updateByUUID(uuid, updates) {
@@ -94,6 +317,605 @@ class Job {
         if (error) throw new Error(`Error fetching job with quote UUID ${quote_uuid}: ${error.message}`);
         return data;
     }
+
+    static async list({ status, limit = 5, page = 1, olderThanDays = 30 }) {
+        const safeLimit = clampInt(limit, 5, 1, 50);
+        const safePage = clampInt(page, 1, 1, 999999);
+        const safeOlder = clampInt(olderThanDays, 30, 0, 3650);
+
+        const from = (safePage - 1) * safeLimit;
+        const to = from + safeLimit - 1;
+
+        const olderThanIso =
+        safeOlder > 0
+            ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
+            : null;
+
+        // ✅ jobs.* and nested job_recurrences (filtered client-side to non-deleted)
+        // Supabase doesn't support filtering nested selects super cleanly without RPC,
+        // so we fetch them and filter in JS.
+        let q = supabase
+        .from("jobs")
+        .select(
+            `
+            *,
+            quote:quotes (
+                uuid,
+                contact_first_name,
+                contact_last_name
+            ),
+            job_recurrences:job_recurrences (
+                *
+            )
+            `,
+            { count: "exact" }
+        )
+        .eq("is_deleted", false)
+        .order("created_at", { ascending: false });
+
+        if (status) q = q.eq("status", status);
+        if (olderThanIso) q = q.lte("created_at", olderThanIso);
+
+        const { data, error, count } = await q.range(from, to);
+        if (error) throw new Error(error.message);
+
+        // ✅ Filter out deleted recurrences in JS
+        const jobs = (data || []).map((job) => ({
+        ...job,
+        job_recurrences: (job.job_recurrences || []).filter((r) => r.is_deleted === false),
+        }));
+
+        const totalCount = count || 0;
+        const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+
+        return {
+            jobs,
+            page: safePage,
+            totalPages,
+            totalCount,
+            limit: safeLimit,
+        };
+    }
+
+    // Backfill jobs.job_address from quotes.address for jobs where job_address is null
+    static async backfillJobAddressesFromQuotes() {
+        // 1) get jobs missing job_address, include quote address
+        const { data: jobs, error: fetchErr } = await supabase
+            .from("jobs")
+            .select(
+            `
+                uuid,
+                quote_uuid,
+                job_address,
+                quote:quotes (
+                uuid,
+                address
+                )
+            `
+            )
+            .eq("is_deleted", false)
+            .is("job_address", null);
+
+        if (fetchErr) throw new Error(`Fetch jobs for backfill failed: ${fetchErr.message}`);
+
+        let updated = 0;
+        let skipped = 0;
+
+        // 2) update each job with quote.address
+        for (const job of jobs || []) {
+            const addr = job?.quote?.address;
+
+            if (!addr) {
+            skipped++;
+            continue;
+            }
+
+            const { error: upErr } = await supabase
+            .from("jobs")
+            .update({
+                job_address: addr,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("uuid", job.uuid);
+
+            if (upErr) throw new Error(`Update job ${job.uuid} failed: ${upErr.message}`);
+
+            updated++;
+        }
+
+        return {
+            success: true,
+            totalMissing: (jobs || []).length,
+            updated,
+            skipped,
+        };
+    }
+     /**
+   * SUMMARY (for quick-find)
+   * - lightweight job fields
+   * - recurrence_count (computed) without fetching recurrence rows
+   *
+   * Returns:
+   * {
+   *   uuid, status, scheduled_at, total_amount,
+   *   quote_uuid, customer_uuid, is_recurring, job_address,
+   *   recurrence_count
+   * }
+   */
+
+    static async findSummaryByUUID(uuid) {
+      if (!uuid) throw new Error("Job UUID is required");
+
+      const { data: job, error: jobErr } = await supabase
+        .from("jobs")
+        .select(`
+          uuid,
+          status,
+          scheduled_at,
+          scheduled_window_mins,
+          total_amount,
+          quote_uuid,
+          customer_uuid,
+          job_address,
+          is_recurring,
+          is_deleted,
+          customers (
+            first_name,
+            last_name
+          ),
+          quotes (
+            services
+          )
+        `)
+        .eq("uuid", uuid)
+        .eq("is_deleted", false)
+        .maybeSingle();
+
+      if (jobErr) {
+        throw new Error(`Error fetching job summary ${uuid}: ${jobErr.message}`);
+      }
+
+      if (!job) return null;
+
+      const { count, error: recErr } = await supabase
+        .from("job_recurrences")
+        .select("id", { count: "exact", head: true })
+        .eq("job_uuid", uuid)
+        .eq("is_deleted", false);
+
+      if (recErr) {
+        throw new Error(`Error counting recurrences for job ${uuid}: ${recErr.message}`);
+      }
+
+      let scheduleLabel = "Not scheduled";
+
+      if (job.scheduled_at) {
+        const date = new Date(job.scheduled_at);
+
+        scheduleLabel = new Intl.DateTimeFormat("en-NZ", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(date);
+      }
+
+      let customerName = null;
+
+      if (job.customers) {
+        const { first_name, last_name } = job.customers;
+        customerName = [first_name, last_name].filter(Boolean).join(" ");
+      }
+
+      let serviceSummary = null;
+
+      const services = job.quotes?.services;
+
+      if (Array.isArray(services) && services.length > 0) {
+        serviceSummary =
+          services.length === 1
+            ? services[0].label || services[0].value || "1 service"
+            : `${services.length} services`;
+      }
+
+      return {
+        job: {
+          uuid: job.uuid,
+          status: job.status,
+          scheduled_at: job.scheduled_at,
+          scheduled_window_mins: job.scheduled_window_mins,
+          total_amount: job.total_amount,
+          currency: "NZD",
+          quote_uuid: job.quote_uuid,
+          customer_uuid: job.customer_uuid,
+          customer_name: customerName,
+          job_address: job.job_address,
+          service_summary: serviceSummary,
+          is_recurring: job.is_recurring,
+          recurrence_count: count ?? 0,
+          is_deleted: job.is_deleted,
+          schedule_label: scheduleLabel,
+        },
+      };
+    }
+  /**
+   * DETAILED (for job detail page)
+   * - full job row
+   * - all job_recurrences (non-deleted)
+   * - optionally includes a tiny quote preview for display
+   *
+   * Returns:
+   * {
+   *   ...jobColumns,
+   *   quote: { uuid, contact_first_name, contact_last_name } | null,
+   *   job_recurrences: [...]
+   * }
+   */
+
+    static async findDetailedByUUID(uuid) {
+      if (!uuid) throw new Error("Job UUID is required");
+
+      const { data: job, error: jobErr } = await supabase
+        .from("jobs")
+        .select(`
+          uuid,
+          customer_uuid,
+          quote_uuid,
+          status,
+          services,
+          total_amount,
+          scheduled_at,
+          scheduled_window_mins,
+          scheduled_window_preset,
+          is_recurring,
+          recurrence_frequency,
+          recurrence_interval,
+          recurrence_end_date,
+          job_address,
+          notes,
+          created_at,
+          updated_at,
+          is_deleted,
+          customers (
+            uuid,
+            first_name,
+            last_name,
+            email,
+            mobile_phone,
+            landline_phone,
+            address
+          )
+        `)
+        .eq("uuid", uuid)
+        .eq("is_deleted", false)
+        .maybeSingle();
+
+      if (jobErr) {
+        throw new Error(`Error fetching job ${uuid}: ${jobErr.message}`);
+      }
+
+      if (!job) return null;
+
+      let quote = null;
+
+      if (job.quote_uuid) {
+        const { data: q, error: qErr } = await supabase
+          .from("quotes")
+          .select(`
+            uuid,
+            status,
+            contact_first_name,
+            contact_last_name,
+            contact_email,
+            contact_mobile,
+            contact_landline,
+            preferred_contact_method,
+            services,
+            subtotal_amount,
+            gst_amount,
+            total_amount,
+            expiry_end,
+            is_quote_sent_to_client,
+            quote_sent_at,
+            message,
+            employer_message,
+            created_at,
+            updated_at
+          `)
+          .eq("uuid", job.quote_uuid)
+          .eq("is_deleted", false)
+          .maybeSingle();
+
+        if (qErr) {
+          throw new Error(`Error fetching quote for job ${uuid}: ${qErr.message}`);
+        }
+
+        quote = q || null;
+      }
+
+      const { data: recs, error: recErr } = await supabase
+        .from("job_recurrences")
+        .select(`
+          uuid,
+          job_uuid,
+          scheduled_at,
+          scheduled_window_mins,
+          scheduled_window_preset,
+          status,
+          created_at,
+          updated_at,
+          is_deleted
+        `)
+        .eq("job_uuid", uuid)
+        .eq("is_deleted", false)
+        .order("scheduled_at", { ascending: true });
+
+      if (recErr) {
+        throw new Error(`Error fetching recurrences for job ${uuid}: ${recErr.message}`);
+      }
+
+      const recurrenceCount = Array.isArray(recs) ? recs.length : 0;
+
+      let customer = null;
+      if (job.customers) {
+        customer = {
+          uuid: job.customers.uuid,
+          first_name: job.customers.first_name ?? null,
+          last_name: job.customers.last_name ?? null,
+          full_name: [job.customers.first_name, job.customers.last_name].filter(Boolean).join(" ") || null,
+          email: job.customers.email ?? null,
+          mobile: job.customers.mobile ?? null,
+          landline: job.customers.landline ?? null,
+          address: job.customers.address ?? null,
+        };
+      }
+
+      let scheduleLabel = "Not scheduled";
+      if (job.scheduled_at) {
+        scheduleLabel = new Intl.DateTimeFormat("en-NZ", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date(job.scheduled_at));
+      }
+
+      let recurrenceSummary = "One-off";
+      if (job.is_recurring) {
+        const freq = job.recurrence_frequency || "recurring";
+        const interval = Number(job.recurrence_interval) || 1;
+
+        if (interval === 1) {
+          recurrenceSummary = freq.charAt(0).toUpperCase() + freq.slice(1);
+        } else {
+          recurrenceSummary = `Every ${interval} ${freq}`;
+        }
+      }
+
+      return {
+        uuid: job.uuid,
+        customer_uuid: job.customer_uuid,
+        quote_uuid: job.quote_uuid,
+        status: job.status,
+        services: Array.isArray(job.services) ? job.services : [],
+        total_amount: job.total_amount,
+        scheduled_at: job.scheduled_at,
+        scheduled_window_mins: job.scheduled_window_mins ?? null,
+        scheduled_window_preset: job.scheduled_window_preset ?? null,
+        schedule_label: scheduleLabel,
+        is_recurring: !!job.is_recurring,
+        recurrence_frequency: job.recurrence_frequency ?? null,
+        recurrence_interval: job.recurrence_interval ?? null,
+        recurrence_end_date: job.recurrence_end_date ?? null,
+        recurrence_summary: recurrenceSummary,
+        recurrence_count: recurrenceCount,
+        job_address: job.job_address ?? null,
+        notes: job.notes ?? null,
+        created_at: job.created_at ?? null,
+        updated_at: job.updated_at ?? null,
+        customer,
+        quote,
+        job_recurrences: recs || [],
+      };
+    }
+
+  static async findDashboardJobs({
+    range,
+    page = 1,
+    limit = 10,
+  }) {
+    const safePage = Math.max(parseInt(String(page), 10) || 1, 1);
+    const safeLimit = Math.min(Math.max(parseInt(String(limit), 10) || 10, 1), 50);
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
+    const allowedRanges = ["attention", "today", "tomorrow", "next7days"];
+    if (!allowedRanges.includes(range)) {
+      throw new Error("range must be one of: attention, today, tomorrow, next7days");
+    }
+
+    const now = new Date();
+
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const startOfTomorrow = new Date(startOfToday);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+    const startOfDayAfterTomorrow = new Date(startOfTomorrow);
+    startOfDayAfterTomorrow.setDate(startOfDayAfterTomorrow.getDate() + 1);
+
+    const startOf7DaysLater = new Date(startOfToday);
+    startOf7DaysLater.setDate(startOf7DaysLater.getDate() + 7);
+    startOf7DaysLater.setHours(23, 59, 59, 999);
+
+    // Base jobs load
+    const { data: jobs, error: jobsError } = await supabase
+      .from("jobs")
+      .select(`
+        uuid,
+        status,
+        scheduled_at,
+        created_at,
+        total_amount,
+        job_address,
+        is_recurring,
+        recurrence_end_date,
+        recurrence_frequency,
+        recurrence_interval,
+        quote:quotes (
+          uuid,
+          contact_first_name,
+          contact_last_name
+        )
+      `)
+      .order("created_at", { ascending: false });
+
+    if (jobsError) {
+      throw new Error(`Error fetching jobs: ${jobsError.message}`);
+    }
+
+    const jobUUIDs = (jobs || []).map((j) => j.uuid);
+
+    let recurrences = [];
+    if (jobUUIDs.length > 0) {
+      const { data: recurrenceData, error: recurrenceError } = await supabase
+        .from("job_recurrences")
+        .select(`
+          id,
+          job_uuid,
+          scheduled_at,
+          is_completed,
+          completed_date,
+          status,
+          is_deleted,
+          previous_status,
+          updated_at
+        `)
+        .in("job_uuid", jobUUIDs)
+        .order("scheduled_at", { ascending: true });
+
+      if (recurrenceError) {
+        throw new Error(`Error fetching job recurrences: ${recurrenceError.message}`);
+      }
+
+      recurrences = recurrenceData || [];
+    }
+
+    const recurrenceMap = new Map();
+    for (const r of recurrences) {
+      if (!recurrenceMap.has(r.job_uuid)) {
+        recurrenceMap.set(r.job_uuid, []);
+      }
+      recurrenceMap.get(r.job_uuid).push(r);
+    }
+
+    const isValidFutureRecurrence = (r) => {
+      if (!r) return false;
+      if (r.is_deleted) return false;
+      if (r.is_completed) return false;
+      if (!r.scheduled_at) return false;
+      return new Date(r.scheduled_at) >= now;
+    };
+
+    const isValidUpcomingRecurrence = (r) => {
+      if (!r) return false;
+      if (r.is_deleted) return false;
+      if (r.is_completed) return false;
+      if (!r.scheduled_at) return false;
+      return true;
+    };
+
+    const enrichedJobs = (jobs || []).map((job) => {
+      const jobRecs = recurrenceMap.get(job.uuid) || [];
+
+      const futureRecs = jobRecs.filter(isValidFutureRecurrence);
+      const sortedFutureRecs = [...futureRecs].sort(
+        (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+      );
+
+      const nextUpcomingRecurrence = sortedFutureRecs[0] || null;
+      const futureRecurrenceCount = sortedFutureRecs.length;
+
+      let needsAttention = false;
+      let attentionReason = null;
+
+      if (!job.scheduled_at && !nextUpcomingRecurrence) {
+        needsAttention = true;
+        attentionReason = "missing_schedule";
+      } else if (job.is_recurring) {
+        const recurrenceEndDate = job.recurrence_end_date ? new Date(job.recurrence_end_date) : null;
+
+        if (recurrenceEndDate && recurrenceEndDate < now && futureRecurrenceCount === 0) {
+          needsAttention = true;
+          attentionReason = "recurrence_ended";
+        } else if (futureRecurrenceCount === 0) {
+          needsAttention = true;
+          attentionReason = "no_future_recurrences";
+        } else if (futureRecurrenceCount < 5) {
+          needsAttention = true;
+          attentionReason = "low_future_recurrences";
+        }
+      }
+
+      return {
+        ...job,
+        scheduled_at: nextUpcomingRecurrence?.scheduled_at || job.scheduled_at || null,
+        job_recurrences: jobRecs,
+        future_recurrence_count: futureRecurrenceCount,
+        needs_attention: needsAttention,
+        attention_reason: attentionReason,
+      };
+    });
+
+    let filtered = [];
+
+    if (range === "attention") {
+      filtered = enrichedJobs.filter((job) => job.needs_attention);
+    }
+
+    if (range === "today") {
+      filtered = enrichedJobs.filter((job) => {
+        if (!job.scheduled_at) return false;
+        const d = new Date(job.scheduled_at);
+        return d >= startOfToday && d < startOfTomorrow;
+      });
+    }
+
+    if (range === "tomorrow") {
+      filtered = enrichedJobs.filter((job) => {
+        if (!job.scheduled_at) return false;
+        const d = new Date(job.scheduled_at);
+        return d >= startOfTomorrow && d < startOfDayAfterTomorrow;
+      });
+    }
+
+    if (range === "next7days") {
+      filtered = enrichedJobs.filter((job) => {
+        if (!job.scheduled_at) return false;
+        const d = new Date(job.scheduled_at);
+        return d >= startOfDayAfterTomorrow && d <= startOf7DaysLater;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+
+    const total = filtered.length;
+    const pagedJobs = filtered.slice(from, to + 1);
+    const totalPages = Math.max(Math.ceil(total / safeLimit), 1);
+
+    return {
+      jobs: pagedJobs,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPrevPage: safePage > 1,
+      },
+    };
+  }
 
 }
 

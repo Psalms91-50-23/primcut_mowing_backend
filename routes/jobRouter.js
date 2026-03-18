@@ -1,5 +1,12 @@
 import express from 'express';
 const router = express.Router();
+import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireRole } from '../middleware/role.middleware.js';
+import {
+  authRateLimit,
+  publicRateLimit,
+  authenticatedRateLimit
+} from '../middleware/rateLimit.middleware.js';
 
 import {
     getAllJobs,
@@ -7,12 +14,23 @@ import {
     createJobFromQuote,
     getJobByQuoteUUID,
     hardDeleteJobByUUID,
-    updateByUUID
+    updateByUUID,
+    backfillJobAddresses,
+    getJobSummaryByUUID,
+    getJobDetailedByUUID,
+    updateJobSchedule,
+    getJobRecurrences,
+    extendJobRecurrences,
+    getDashboardJobs
 } from '../controllers/jobController.js';
 
 // GET all jobs
 router.get('/all', getAllJobs);
+// router.get('/all', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), getAllJobs);
 
+router.post("/backfill-addresses", backfillJobAddresses);
+
+router.get("/dashboard", getDashboardJobs);
 // GET job by UUID
 router.get('/uuid/:uuid', getJobByUUID);
 
@@ -27,6 +45,15 @@ router.delete('/uuid/:uuid', hardDeleteJobByUUID);
 
 // UPDATE job by UUID
 router.patch('/uuid/:uuid', updateByUUID);
+
+router.get("/:uuid/summary", getJobSummaryByUUID);
+
+router.get("/:uuid/details", getJobDetailedByUUID);
+
+router.patch("/:uuid/schedule", updateJobSchedule);
+
+router.get("/:uuid/recurrences", getJobRecurrences);
+router.post("/:uuid/recurrences/extend", extendJobRecurrences);
 
 
 export default router;

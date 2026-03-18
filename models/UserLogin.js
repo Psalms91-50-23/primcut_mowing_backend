@@ -2,6 +2,7 @@
 import supabase from '../config/db.js'; // your supabase client
 
 class UserLogin {
+
   static tableName = 'user_logins';
 
   /**
@@ -14,6 +15,7 @@ class UserLogin {
    * @param {boolean} params.success
    * @returns inserted record
    */
+  
   static async create({ uuid, user_uuid, ip_address, user_agent, success }) {
     const now = new Date().toISOString();
 
@@ -66,6 +68,17 @@ class UserLogin {
     if (error) return [];
     return data;
   }
+
+  static async deleteByUUID(uuid) {
+    const { data, error } = await supabase
+      .from(this.tableName)
+      .delete()
+      .eq('uuid', uuid);
+
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
 }
 
 export default UserLogin;

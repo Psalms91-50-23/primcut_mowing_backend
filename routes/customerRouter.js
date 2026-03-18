@@ -14,9 +14,22 @@ import {
     linkCustomerToBusiness,
     getCustomerByPhone,
     getAllCustomersWithDetails,
-    getOneCustomersWithDetails
+    getOneCustomersWithDetails,
+    getCustomerDetailedByUUID,
+    getCustomerSummaryByUUID,
+    getCustomerQuotes,
+    getCustomerJobsAndRecurrences,
+    getCustomerContacts,
+    getMyCustomer
 } from '../controllers/customerController.js';
 
+import {
+  authRateLimit,
+  publicRateLimit,
+  authenticatedRateLimit
+} from '../middleware/rateLimit.middleware.js';
+import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireRole } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // GET all customers
@@ -27,6 +40,8 @@ const router = express.Router();
 // allows to get all customers using  http://localhost:4000/api/customers or
 // pagination http://localhost:4000/api/customers?page=2&pageSize=7
 router.get('/', getAllCustomersWithDetails);
+
+router.get("/me", requireAuth, getMyCustomer);
 // GET one customers and details
 router.get('/one/details/uuid/:uuid', getOneCustomersWithDetails);
 
@@ -34,7 +49,7 @@ router.get('/one/details/uuid/:uuid', getOneCustomersWithDetails);
 router.get('/id/:id', getCustomerById);
 
 // GET customer by UUID
-router.get('/uuid/:uuid', getCustomerByUUID);
+router.get('/uuid/:uuid', requireAuth, authenticatedRateLimit,  requireRole(["owner", "admin","employee", "customer"]), getCustomerByUUID);
 
 // GET customers by email
 router.get('/email/:email', getCustomerByEmail);
@@ -53,6 +68,15 @@ router.post('/', createCustomer);
 
 // UPDATE customer by UUID
 router.patch('/uuid/:uuid', updateCustomerByUUID);
+    
+//get quotes for customer by uuid
+router.get('/uuid/:uuid/quotes', getCustomerQuotes);
+
+//get customer alternative contacts for customer by uuid
+router.get('/uuid/:uuid/contacts', getCustomerContacts);
+
+//get jobs and recurrences for customer by uuid
+router.get('/uuid/:uuid/jobs-and-recurrences', getCustomerJobsAndRecurrences);
 
 // UPDATE customer by ID
 router.patch('/id/:id', updateCustomerById);
@@ -69,5 +93,8 @@ router.delete('/hard-delete/uuid/:uuid', hardDeleteCustomer);
 // LINK customer to business
 router.patch('/uuid/:customer_uuid/link-business', linkCustomerToBusiness);
 
+router.get("/:uuid/summary", getCustomerSummaryByUUID);
+
+router.get("/:uuid/details", getCustomerDetailedByUUID);
 
 export default router;

@@ -2,7 +2,7 @@ import Employee from '../models/Employee.js';
 import User from '../models/User.js';
 import supabase from '../config/db.js';
 import jwt from 'jsonwebtoken';
-import { generateShortId, normalizeNZPhone } from '../util/util.js';
+import { normalizeNZPhone, generatePrefixedId } from '../util/util.js';
 import { formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
 import { verifyEmailLink } from "../lib/email/index.js"
 
@@ -47,7 +47,8 @@ export const createEmployeeLinkToUser = async (req, res) => {
     let uuid;
     let exists;
     do {
-      uuid = generateShortId(9);
+      uuid = generatePrefixedId("E", 8);
+      // uuid = generatePrefixedId(8, "E");
       exists = await User.findByUUID(uuid);
     } while (exists);
 
@@ -106,7 +107,7 @@ export const createEmployee  = async (req, res) => {
     let uuid;
     let exists;
     do {
-      uuid = generateShortId(9);
+      uuid = generatePrefixedId(8, "E");
       exists = await Employee.findByUUID(uuid);
     } while (exists);
 

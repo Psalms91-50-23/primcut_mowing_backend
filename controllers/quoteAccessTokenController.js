@@ -1,8 +1,10 @@
 import crypto from "crypto";
 import Quote from "../models/Quote.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
+import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { sendQuoteToClient } from "../lib/email/index.js";
-import { formatExpiry, generateShortId, formatFullName } from "../util/util.js";
+import { formatExpiry, formatFullName, generatePrefixedId } from "../util/util.js";
+import supabase from "../config/db.js";
 
 const TOKEN_EXPIRY_DAYS = 3;
 
@@ -14,7 +16,7 @@ const generateShortUuid = async () => {
   let exists;
 
   do {
-    uuid = generateShortId(9); // your existing short ID function
+    uuid = generatePrefixedId("QT", 7);
     exists = await QuoteAccessToken.findByUUID(uuid);
   } while (exists);
 
@@ -29,36 +31,29 @@ export const viewQuotePdf = async (req, res) => {
   if (!rawToken) return res.status(401).json({ message: "Missing token" });
 
   try {
-    // 1) Validate quote exists
     const quote = await Quote.findByUUID(uuid);
     if (!quote) return res.status(404).json({ message: "Quote not found" });
 
-    // 2) Validate token (hash match + expiry)
     const token_hash = hashToken(rawToken);
 
-    // Implement this however your model is structured:
-    // Should return the token row if valid and not revoked/expired, else null
     const tokenRow = await QuoteAccessToken.findValidToken({
       quote_uuid: uuid,
-      token_hash
+      token_hash,
     });
 
     if (!tokenRow) {
       return res.status(401).json({ message: "Invalid or expired token" });
     }
 
-    // Optional: also enforce quote expiry_end
     if (quote.expiry_end && new Date(quote.expiry_end) < new Date()) {
       return res.status(410).json({ message: "Quote has expired" });
     }
 
-    // 3) Ensure we have a stored PDF path
-    const pdfPath = quote.quote_pdf_url; // this should be a storage PATH
+    const pdfPath = quote.quote_pdf_url;
     if (!pdfPath) {
       return res.status(404).json({ message: "Quote PDF not available" });
     }
 
-    // 4) Download from Supabase Storage (server-side)
     const { data, error } = await supabase.storage
       .from("quotes-pdf")
       .download(pdfPath);
@@ -68,18 +63,13 @@ export const viewQuotePdf = async (req, res) => {
       return res.status(500).json({ message: "Failed to load PDF" });
     }
 
-    // supabase-js returns a Blob in many environments; convert to Buffer for Node
     const arrayBuffer = await data.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // 5) Stream to client
     res.setHeader("Content-Type", "application/pdf");
 
-    // inline = open in browser; attachment = force download
     const filename = `quote-${uuid}.pdf`;
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-
-    // caching: usually avoid caching for private docs
     res.setHeader("Cache-Control", "no-store");
 
     return res.status(200).send(pdfBuffer);
@@ -91,8 +81,8 @@ export const viewQuotePdf = async (req, res) => {
 
 // 1️⃣ Create token (Admin only)
 export const create = async (req, res) => {
-
   const { quote_uuid } = req.body;
+  const actorUserUuid = req.user?.uuid || null;
 
   if (!quote_uuid) {
     return res.status(400).json({ error: "quote_uuid is required" });
@@ -104,7 +94,6 @@ export const create = async (req, res) => {
       return res.status(404).json({ error: "Quote not found" });
     }
 
-    // revoke old tokens
     await QuoteAccessToken.revokeAllByQuoteUUID(quote_uuid);
 
     const rawToken = crypto.randomBytes(32).toString("hex");
@@ -115,14 +104,13 @@ export const create = async (req, res) => {
 
     const tokenUuid = await generateShortUuid();
 
-    await QuoteAccessToken.create({
+    const createdToken = await QuoteAccessToken.create({
       quote_uuid,
       token_hash,
       expires_at: expires_at.toISOString(),
       uuid: tokenUuid,
     });
 
-    // send email
     const quoteViewLink = `${process.env.CLIENT_URL}/quotes/view/${quote_uuid}?token=${rawToken}`;
 
     await sendQuoteToClient({
@@ -130,11 +118,11 @@ export const create = async (req, res) => {
       subject: "Your Quote is Ready",
       data: {
         quoteUUID: quote_uuid,
-        name: formatFullName(updated.contact_first_name, updated.contact_last_name),
-        mobile: updated.contact_mobile,
-        landline: updated.contact_landline,
-        message: updated.message,
-        email: updated.contact_email,
+        name: formatFullName(quote.contact_first_name, quote.contact_last_name),
+        mobile: quote.contact_mobile,
+        landline: quote.contact_landline,
+        message: quote.message,
+        email: quote.contact_email,
         total: quote.total_amount,
         subtotal: quote.subtotal_amount,
         gst: quote.gst_amount,
@@ -145,11 +133,33 @@ export const create = async (req, res) => {
       },
     });
 
+    await createChangeLogSafe({
+      table_name: "quote_access_tokens",
+      record_uuid: createdToken?.uuid || tokenUuid,
+      user_uuid: actorUserUuid,
+      action: "create",
+      summary: "Quote access token created and quote email sent to client.",
+      changed_fields: {
+        uuid: {
+          old: null,
+          new: createdToken?.uuid || tokenUuid,
+        },
+        quote_uuid: {
+          old: null,
+          new: quote_uuid,
+        },
+        expires_at: {
+          old: null,
+          new: expires_at.toISOString(),
+        },
+      },
+      source: "dashboard",
+    });
+
     return res.status(200).json({
       message: "Quote sent successfully",
       token: rawToken,
     });
-
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -158,6 +168,7 @@ export const create = async (req, res) => {
 // 2️⃣ Revoke tokens (Admin only)
 export const revokeAll = async (req, res) => {
   const { quote_uuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
 
   if (!quote_uuid) {
     return res.status(400).json({ error: "quote_uuid is required" });
@@ -165,6 +176,19 @@ export const revokeAll = async (req, res) => {
 
   try {
     await QuoteAccessToken.revokeAllByQuoteUUID(quote_uuid);
+
+    await createChangeLogSafe({
+      table_name: "quotes",
+      record_uuid: quote_uuid,
+      user_uuid: actorUserUuid,
+      action: "update",
+      summary: "All quote access tokens revoked.",
+      changed_fields: {
+        access_tokens_revoked: true,
+      },
+      source: "dashboard",
+    });
+
     return res.status(200).json({ message: "Tokens revoked" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -177,8 +201,8 @@ export const viewPublicQuote = async (req, res) => {
   const { token } = req.query;
 
   if (!uuid || !token) {
-      return res.status(400).json({ error: "Quote UUID and token are required" });
-    }
+    return res.status(400).json({ error: "Quote UUID and token are required" });
+  }
 
   try {
     const token_hash = hashToken(token);
@@ -193,124 +217,192 @@ export const viewPublicQuote = async (req, res) => {
       return res.status(401).json({ error: "Token expired" });
     }
 
-    // If valid, return the quote
     const quote = await Quote.findByUUID(tokenRecord.quote_uuid);
-    console.log({quote}, " view public quote")
+    console.log({ quote }, " view public quote");
 
     if (!quote || quote.status === "draft") {
       return res.status(404).json({ error: "Quote not available" });
     }
 
-    const accessTokenViewCounter = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid)
-    if(!accessTokenViewCounter){
+    const accessTokenViewCounter = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
+    if (!accessTokenViewCounter) {
       console.warn("Quote access updated failed for token:", tokenRecord.uuid);
-      //  return res.status(404).json({ error: `Quote access failed to update with access token uuid: ${tokenRecord.uuid}`});
     }
 
     return res.status(200).json({ quote });
-
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
 
-
 export const validateQuoteAccessToken = async (req, res) => {
-  const { uuid } = req.params; // quote UUID
-  const { token } = req.body;   // raw token from frontend
+  const { uuid } = req.params;
+  const { token } = req.body;
 
-  console.log("validate quote token access as no cookies")
+  console.log("validate quote token access as no cookies");
 
   if (!uuid || !token) {
     return res.status(400).json({ message: "Quote UUID and token are required" });
   }
 
   try {
-    // Hash the incoming token for comparison
     const tokenHash = hashToken(token);
-
-    // Find a valid token record
+    const now = new Date();
     const tokenRecord = await QuoteAccessToken.findOne(uuid, tokenHash);
     if (!tokenRecord) {
-      return res.status(401).json({ message: "Invalid or expired token" });
+
+      res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      return res.status(401).json({ message: "Invalid or expired quote link" });
+
     }
 
-    // Fetch the quote
+    if (tokenRecord.expires_at && new Date(tokenRecord.expires_at) < now) {
+      res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      return res.status(401).json({ message: "Invalid or expired quote link" });
+    }
+
     const quote = await Quote.findByUUID(uuid);
     if (!quote) {
-      return res.status(404).json({ message: "Quote not found" });
+       res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+        return res.status(401).json({ message: "Invalid or expired quote link" });
     }
 
-    // Check token expiry against quote expiry_end
-    const now = new Date();
     const quoteExpiry = new Date(quote.expiry_end);
-    if (quoteExpiry < now) {
-      return res.status(401).json({ message: "Quote has expired" });
+    
+     if (Number.isNaN(quoteExpiry.getTime()) || quoteExpiry < now) {
+      res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      return res.status(401).json({ message: "Invalid or expired quote link" });
     }
 
-    // Optional: revoke token if single-use
-    // await tokenRecord.destroy();
+    const maxAgeMs = quoteExpiry.getTime() - now.getTime();
 
-    // Set a cookie that expires at the same time as the quote
-    const maxAgeMs = quoteExpiry.getTime() - now.getTime(); // milliseconds until quote expiry
     res.cookie("quote_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: maxAgeMs > 0 ? maxAgeMs : 0, // prevent negative
+      maxAge: maxAgeMs > 0 ? maxAgeMs : 0,
     });
 
-    const quoteAccessToken = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid)
-    if(!quoteAccessToken){
+    const quoteAccessToken = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
+    if (!quoteAccessToken) {
       console.warn("Quote access updated failed for token:", tokenRecord.uuid);
-      //  return res.status(404).json({ error: `Quote access failed to update with access token uuid: ${tokenRecord.uuid}`});
     }
 
-    // Return the quote
-    return res.status(200).json({ quote, accessToken: quoteAccessToken });
+    return res.status(200).json({ quote });
+    // return res.status(200).json({ quote, accessToken: quoteAccessToken });
   } catch (err) {
     console.error("Quote token validation error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-export const validateQuoteSession = async (req, res) => {
+// export const validateQuoteSession = async (req, res) => {
+//   try {
+//     const sessionToken = req.cookies?.quote_session;
 
+//     if (!sessionToken) {
+//       return res.status(401).json({ message: "No active session" });
+//     }
+
+//     const tokenHash = hashToken(sessionToken);
+
+//     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
+
+//     if (!tokenRecord) {
+//       return res.status(401).json({ message: "Invalid or expired session" });
+//     }
+
+//     const quote = await Quote.findByUUID(tokenRecord.quote_uuid);
+//     if (!quote || quote.status === "draft") {
+//       return res.status(404).json({ message: "Quote not available" });
+//     }
+
+//     const now = new Date();
+//     const quoteExpiry = new Date(quote.expiry_end);
+//     if (quoteExpiry < now) {
+//       return res.status(401).json({ message: "Quote has expired" });
+//     }
+
+//     await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
+
+//     return res.status(200).json({ quote });
+//   } catch (err) {
+//     console.error("Session validation error:", err);
+//     return res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+export const validateQuoteSession = async (req, res) => {
   try {
-    // Get the session cookie from headers
+    const { uuid } = req.params;
     const sessionToken = req.cookies?.quote_session;
+
+    if (!uuid) {
+      return res.status(400).json({ message: "Quote UUID is required" });
+    }
 
     if (!sessionToken) {
       return res.status(401).json({ message: "No active session" });
     }
 
-    // Hash the session token to match stored token hash
     const tokenHash = hashToken(sessionToken);
-
-    // Look up the session in quote_access_tokens
     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
 
     if (!tokenRecord) {
+      res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+
       return res.status(401).json({ message: "Invalid or expired session" });
     }
 
-    // Fetch the quote
-    const quote = await Quote.findByUUID(tokenRecord.quote_uuid);
+    if (tokenRecord.quote_uuid !== uuid) {
+      res.clearCookie("quote_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+
+      return res.status(403).json({ message: "Session does not match requested quote" });
+    }
+
+    const quote = await Quote.findByUUID(uuid);
     if (!quote || quote.status === "draft") {
       return res.status(404).json({ message: "Quote not available" });
     }
 
-    // Check if quote has expired
     const now = new Date();
     const quoteExpiry = new Date(quote.expiry_end);
     if (quoteExpiry < now) {
       return res.status(401).json({ message: "Quote has expired" });
     }
 
-    // Optional: increment view counter again for session views
     await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
 
-    // Return the quote
     return res.status(200).json({ quote });
   } catch (err) {
     console.error("Session validation error:", err);

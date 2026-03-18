@@ -1,4 +1,6 @@
-import supabase from "./config/db.js";
+import supabase from "../config/db.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 console.info("Auto-expire quotes job started");
 
@@ -6,38 +8,6 @@ console.info("Auto-expire quotes job started");
   const nowISO = new Date().toISOString();
 
   try {
-    // 0) Only continue if quotes table has data
-    const { count: quotesCount, error: countError } = await supabase
-      .from("quotes")
-      .select("*", { count: "exact", head: true });
-
-    if (countError) {
-      await supabase.from("function_logs").insert([
-        {
-          function_name: "auto-expire-quotes",
-          message: `Count error: ${countError.message}`,
-          created_at: nowISO,
-        },
-      ]);
-
-      console.error("Error checking quotes count:", countError.message);
-      process.exit(1);
-    }
-
-    if (!quotesCount || quotesCount === 0) {
-      console.info("No quotes found. Skipping auto-expire job.");
-
-      await supabase.from("function_logs").insert([
-        {
-          function_name: "auto-expire-quotes",
-          message: "Skipped: quotes table has no data",
-          created_at: nowISO,
-        },
-      ]);
-
-      process.exit(0);
-    }
-
     // 1) Expire sent quotes (client-facing)
     const { data: expiredQuotes, error: expireError } = await supabase
       .from("quotes")
@@ -60,59 +30,12 @@ console.info("Auto-expire quotes job started");
           created_at: nowISO,
         },
       ]);
-
       console.error("Error expiring sent quotes:", expireError.message);
       process.exit(1);
     }
 
-    // 1.1) Add change logs for expired quotes
-    if (expiredQuotes && expiredQuotes.length > 0) {
-      const changeLogRows = expiredQuotes.map((quote) => ({
-        table_name: "quotes",
-        record_uuid: quote.uuid,
-        user_uuid: null,
-        action: "update",
-        summary: "Quote automatically expired by scheduled job",
-        changed_fields: {
-          status: {
-            from: "sent",
-            to: "expired",
-          },
-          is_active: {
-            from: true,
-            to: false,
-          },
-          is_expired: {
-            from: false,
-            to: true,
-          },
-        },
-        source: "system",
-        created_at: nowISO,
-      }));
-
-      const { error: changeLogError } = await supabase
-        .from("change_logs")
-        .insert(changeLogRows);
-
-      if (changeLogError) {
-        await supabase.from("function_logs").insert([
-          {
-            function_name: "auto-expire-quotes",
-            message: `Change log error: ${changeLogError.message}`,
-            created_at: nowISO,
-          },
-        ]);
-
-        console.error("Error inserting change logs:", changeLogError.message);
-        process.exit(1);
-      }
-    }
-
     // 2) Mark stale drafts (internal) - 14 days since last update
-    const staleCutoffISO = new Date(
-      Date.now() - 14 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const staleCutoffISO = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: staleDrafts, error: staleError } = await supabase
       .from("quotes")
@@ -134,7 +57,6 @@ console.info("Auto-expire quotes job started");
           created_at: nowISO,
         },
       ]);
-
       console.error("Error marking stale drafts:", staleError.message);
       process.exit(1);
     }

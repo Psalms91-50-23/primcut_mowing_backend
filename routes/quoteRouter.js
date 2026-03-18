@@ -14,7 +14,7 @@ import {
     updateQuoteByUUID,
     updateQuoteById,
     softDeleteQuote,
-    reinstateQuote,
+    // reinstateQuote,
     hardDeleteQuote,
     acceptQuote,
     rejectQuote,
@@ -23,7 +23,12 @@ import {
     deleteAllFilesFromBucket,
     getQuotes,
     getLimitedQuoteByUUID,
-    autoExpireQuote
+    autoExpireQuote,
+    restoreQuote,
+    getQuoteSummaryByUUID,
+    getQuoteDetailedByUUID,
+    linkCustomerToQuote 
+    
 } from "../controllers/quoteController.js";
 import { viewQuotePdf } from "../controllers/viewQuotePdfController.js";
 
@@ -32,16 +37,15 @@ import {
 } from "../controllers/quoteAccessTokenController.js"
 
 const router = express.Router();
+// GET quotes with pagination and filtering
+router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), getQuotes);
 //PDF route for quote
-router.get("/quotes/:uuid/pdf", viewQuotePdf);
+router.get("/:uuid/pdf", viewQuotePdf);
 // GET all quotes
 router.get("/all", getAllQuotes);
 
 // GET quote by ID
 router.get("/id/:id", getQuoteById);
-
-// GET quotes
-router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), getQuotes);
 
 // router.get('/api/quotes/public', viewPublicQuote);
 
@@ -49,22 +53,22 @@ router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admi
 router.get("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
 
 // GET quote by UUID
-router.get("/customer/uuid/:uuid", getQuoteByUUID);
+router.get("/customer/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
 
 //Auto update quote status to expired
 router.patch("/public/customer/uuid/:uuid", publicRateLimit,  autoExpireQuote);
 
-// CREATE quote
-router.post("/create", createQuote);
-
 // UPDATE quote by UUID
-router.patch("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]), updateQuoteByUUID);
+router.patch("/uuid/:uuid", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), updateQuoteByUUID);
 
 // update quote by uuid admin
-router.patch("/admin/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee"]),  updateQuoteByUUIDEmployee);
+router.patch("/employee/uuid/:uuid", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]),  updateQuoteByUUIDEmployee);
 
 // UPDATE quote by ID
 router.patch("/id/:id", updateQuoteById);
+
+// CREATE quote
+router.post("/create", createQuote);
 
 // ACCEPT quote
 router.patch("/public/accept/uuid/:uuid", acceptQuote)
@@ -78,15 +82,23 @@ router.patch("/public/reject/uuid/:uuid", rejectQuote)
 // SOFT DELETE
 router.patch("/soft-delete/uuid/:uuid", softDeleteQuote);
 
-// REINSTATE
-router.patch("/reinstate/uuid/:uuid", reinstateQuote);
+// RESTORE quote
+router.patch("/restore-delete/uuid/:uuid", restoreQuote);
+// router.patch("/reinstate/uuid/:uuid", reinstateQuote);
 
 // HARD DELETE
-router.delete("/hard-delete/uuid/:uuid", hardDeleteQuote);
+router.delete("/hard-delete/uuid/:uuid", requireAuth, requireRole(["owner", "admin"]), hardDeleteQuote);
 
 // EXTEND quote
 router.patch("/extend/uuid/:uuid", extendQuoteController);
 
 router.delete("/dev/delete-all-quote-images", deleteAllFilesFromBucket);
+
+router.get("/:uuid/summary", getQuoteSummaryByUUID);
+
+router.get("/:uuid/details", getQuoteDetailedByUUID);
+
+router.patch("/public/link-customer/uuid/:uuid", linkCustomerToQuote );
+
 
 export default router;

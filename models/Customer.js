@@ -1,6 +1,92 @@
 import supabase from '../config/db.js';
 
+function buildSearchOr(terms, columns) {
+  const filters = [];
+
+  for (const rawTerm of terms) {
+    const term = String(rawTerm || "").trim().replace(/,/g, "");
+    if (!term) continue;
+
+    for (const column of columns) {
+      filters.push(`${column}.ilike.%${term}%`);
+    }
+  }
+
+  return filters.join(",");
+}
+
 class Customer {
+
+    static async findQuotesByCustomerUUID(uuid) {
+        if (!uuid) {
+            throw new Error("Customer UUID is required");
+        }
+        const { data, error } = await supabase
+            .from('quotes')
+            .select('*')
+            .eq('customer_uuid', uuid)
+            .eq("is_deleted", false)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
+        }
+        return data;
+    }
+
+    static async findJobsByCustomerUUID(uuid) {
+        if (!uuid) {
+            throw new Error("Customer UUID is required");
+        }
+
+        const { data, error } = await supabase
+            .from("jobs")
+            .select(`
+                *,
+                job_recurrences (*)
+            `)
+            .eq("customer_uuid", uuid)
+            .eq("is_deleted", false)
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            throw new Error(`Error fetching jobs for customer with UUID ${uuid}: ${error.message}`);
+        }
+
+        return (data || []).map((job) => ({
+            ...job,
+            recurrences: job.job_recurrences || [],
+        }));
+    }
+
+    static async searchSummary(query, limit = 10) {
+        const terms = String(query || "")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+        if (terms.length === 0) return [];
+
+        const orFilter = buildSearchOr(terms, [
+        "uuid",
+        "first_name",
+        "last_name",
+        "email",
+        "mobile_phone",
+        "landline_phone",
+        "address",
+        ]);
+
+        const { data, error } = await supabase
+        .from("customers")
+        .select("uuid, first_name, last_name, email, mobile_phone, landline_phone, address, created_at")
+        .or(orFilter)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+        if (error) throw error;
+        return data || [];
+    }
 
     static async findAllWithDetailsPaginated({
         page = 1,
@@ -250,14 +336,35 @@ class Customer {
     }
 
     static async findByEmail(email) {
+        const cleanEmail = email?.toLowerCase().trim();
         const { data, error } = await supabase
             .from('customers')
             .select('*')
-            .eq('email', email)
+            .eq('email', cleanEmail)
             .maybeSingle();
 
         if (error) {
             throw new Error(`Error fetching customer with email ${email}: ${error.message}`);
+        }
+        return data;
+
+    }
+
+    static async findByEmailAndName(email, firstName, lastName) {
+        const cleanEmail = email?.toLowerCase().trim();
+        const cleanFirst = firstName?.trim();
+        const cleanLast = lastName?.trim();
+        const { data, error } = await supabase
+            .from('customers')
+            .select('*')
+            .ilike('email', cleanEmail)
+            .ilike('first_name', cleanFirst)
+            .ilike('last_name', cleanLast)
+            .eq("is_deleted", false)
+            .maybeSingle();
+
+        if (error) {
+            throw new Error(`Error fetching customer with email ${cleanEmail}: ${error.message}`);
         }
         return data;
 
@@ -380,6 +487,267 @@ class Customer {
 
         return { data, count };
     }
+    /**
+   * SUMMARY (for quick-find)
+   * - lightweight customer fields
+   * - quote_count, job_count, recurrence_count (computed counts only)
+   *
+   * Returns:
+   * {
+   *   uuid, first_name, last_name, email, address, mobile_phone, landline_phone,
+   *   quote_count, job_count, recurrence_count
+   * }
+   */
+    static async findSummaryByUUID(uuid) {
+        if (!uuid) throw new Error("Customer UUID is required");
+
+        const customerSelect = [
+            "uuid",
+            "first_name",
+            "last_name",
+            "email",
+            "address",
+            "mobile_phone",
+            "landline_phone",
+            "is_deleted",
+            "is_blacklisted",
+            "created_via",
+        ].join(",");
+
+        const { data: customer, error: custErr } = await supabase
+            .from("customers")
+            .select(customerSelect)
+            .eq("uuid", uuid)
+            .eq("is_deleted", false)
+            .maybeSingle();
+
+        if (custErr) {
+            throw new Error(`Error fetching customer summary ${uuid}: ${custErr.message}`);
+        }
+
+        if (!customer) return null;
+
+        // Total quotes
+        const { count: quoteCount, error: quoteErr } = await supabase
+            .from("quotes")
+            .select("id", { count: "exact", head: true })
+            .eq("customer_uuid", uuid)
+            .eq("is_deleted", false);
+
+        if (quoteErr) {
+            throw new Error(`Error counting quotes for customer ${uuid}: ${quoteErr.message}`);
+        }
+
+        // Active quotes
+        const { count: activeQuoteCount, error: activeQuoteErr } = await supabase
+            .from("quotes")
+            .select("id", { count: "exact", head: true })
+            .eq("customer_uuid", uuid)
+            .eq("is_deleted", false)
+            .eq("is_active", true);
+
+        if (activeQuoteErr) {
+            throw new Error(`Error counting active quotes for customer ${uuid}: ${activeQuoteErr.message}`);
+        }
+
+        // Latest quote created_at
+        const { data: latestQuote, error: latestQuoteErr } = await supabase
+            .from("quotes")
+            .select("created_at")
+            .eq("customer_uuid", uuid)
+            .eq("is_deleted", false)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (latestQuoteErr) {
+            throw new Error(`Error fetching latest quote for customer ${uuid}: ${latestQuoteErr.message}`);
+        }
+
+        // Jobs list for counts + latest job
+        const { data: jobs, error: jobsErr } = await supabase
+            .from("jobs")
+            .select("uuid, status, is_completed, scheduled_at, created_at")
+            .eq("customer_uuid", uuid)
+            .eq("is_deleted", false);
+
+        if (jobsErr) {
+            throw new Error(`Error fetching jobs for customer ${uuid}: ${jobsErr.message}`);
+        }
+
+        const safeJobs = jobs || [];
+        const jobUuids = safeJobs.map((j) => j.uuid);
+        const jobCount = safeJobs.length;
+
+        const pendingJobCount = safeJobs.filter((j) => j.status === "pending").length;
+
+        const completedJobCount = safeJobs.filter(
+            (j) => j.is_completed === true || j.status === "completed"
+        ).length;
+
+        const latestJobCreatedAt =
+            safeJobs.length > 0
+            ? safeJobs
+                .map((j) => j.created_at)
+                .filter(Boolean)
+                .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null
+            : null;
+
+        const now = new Date();
+
+        const nextScheduledJobAt =
+            safeJobs
+            .filter((j) => j.scheduled_at && new Date(j.scheduled_at) >= now)
+            .sort(
+                (a, b) =>
+                new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+            )[0]?.scheduled_at || null;
+
+        let recurrenceCount = 0;
+        if (jobUuids.length > 0) {
+            const { count, error: recErr } = await supabase
+            .from("job_recurrences")
+            .select("id", { count: "exact", head: true })
+            .in("job_uuid", jobUuids)
+            .eq("is_deleted", false);
+
+            if (recErr) {
+            throw new Error(`Error counting recurrences for customer ${uuid}: ${recErr.message}`);
+            }
+
+            recurrenceCount = count ?? 0;
+        }
+
+        const latestActivityCandidates = [
+            customer.created_at || null,
+            latestQuote?.created_at || null,
+            latestJobCreatedAt || null,
+        ].filter(Boolean);
+
+        const latestActivityAt =
+            latestActivityCandidates.length > 0
+            ? latestActivityCandidates.sort(
+                (a, b) => new Date(b).getTime() - new Date(a).getTime()
+                )[0]
+            : null;
+
+        return {
+            ...customer,
+            quote_count: quoteCount ?? 0,
+            active_quote_count: activeQuoteCount ?? 0,
+            job_count: jobCount,
+            pending_job_count: pendingJobCount,
+            completed_job_count: completedJobCount,
+            recurrence_count: recurrenceCount,
+            latest_quote_created_at: latestQuote?.created_at || null,
+            latest_job_created_at: latestJobCreatedAt,
+            next_scheduled_job_at: nextScheduledJobAt,
+            latest_activity_at: latestActivityAt,
+        };
+    }
+
+  /**
+   * DETAILED (for customer detail page)
+   * - full customer row
+   * - all quotes for customer (non-deleted)
+   * - all jobs for customer (non-deleted)
+   * - job_recurrences nested under each job
+   *
+   * Returns:
+   * {
+   *   ...customerColumns,
+   *   quotes: [...],
+   *   jobs: [
+   *     { ...job, job_recurrences: [...] }
+   *   ]
+   * }
+   */
+
+  static async findDetailedByUUID(uuid) {
+    if (!uuid) throw new Error("Customer UUID is required");
+
+    const { data: customer, error: custErr } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("uuid", uuid)
+      .eq("is_deleted", false)
+      .maybeSingle();
+
+    if (custErr) throw new Error(`Error fetching customer ${uuid}: ${custErr.message}`);
+    if (!customer) return null;
+
+    // Quotes (non-deleted)
+    const { data: quotes, error: quotesErr } = await supabase
+      .from("quotes")
+      .select("*")
+      .eq("customer_uuid", uuid)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false });
+
+    if (quotesErr) throw new Error(`Error fetching quotes for customer ${uuid}: ${quotesErr.message}`);
+
+    // Jobs (non-deleted)
+    const { data: jobs, error: jobsErr } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("customer_uuid", uuid)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false });
+
+    if (jobsErr) throw new Error(`Error fetching jobs for customer ${uuid}: ${jobsErr.message}`);
+
+    const jobUuids = (jobs || []).map((j) => j.uuid);
+
+    // Fetch all recurrences for all jobs in one go
+    let recurrences = [];
+    if (jobUuids.length > 0) {
+      const { data: recs, error: recErr } = await supabase
+        .from("job_recurrences")
+        .select("*")
+        .in("job_uuid", jobUuids)
+        .eq("is_deleted", false)
+        .order("scheduled_at", { ascending: true });
+
+      if (recErr) throw new Error(`Error fetching recurrences for customer ${uuid}: ${recErr.message}`);
+      recurrences = recs || [];
+    }
+
+    // Index recurrences by job_uuid
+    const byJob = new Map();
+    for (const r of recurrences) {
+      const key = r.job_uuid;
+      if (!byJob.has(key)) byJob.set(key, []);
+      byJob.get(key).push(r);
+    }
+
+    const jobsWithRecs = (jobs || []).map((j) => ({
+      ...j,
+      job_recurrences: byJob.get(j.uuid) || [],
+    }));
+
+    return {
+      ...customer,
+      quotes: quotes || [],
+      jobs: jobsWithRecs,
+    };
+  }
+
+  static async findContactsByCustomerUUID(uuid) {
+    if (!uuid) {
+      throw new Error("Customer UUID is required");
+    }
+    const { data, error } = await supabase
+      .from("customer_contacts")
+      .select("*")
+      .eq("customer_uuid", uuid)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw new Error(`Error fetching contacts for customer with UUID ${uuid}: ${error.message}`);
+    }
+    return data || [];
+  }
 
 }
 

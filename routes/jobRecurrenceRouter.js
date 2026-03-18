@@ -1,11 +1,12 @@
 import express from 'express';
 import {
     createJobRecurrence,
-    getRecurrencesByJob,
+    getRecurrencesByJobUUID,
     getRecurrenceByUUID,
     completeRecurrence,
     missRecurrence,
-    deleteRecurrence
+    deleteRecurrence,
+
 } from '../controllers/jobRecurrenceController.js';
 
 const router = express.Router();
@@ -14,7 +15,7 @@ const router = express.Router();
 router.post('/', createJobRecurrence);
 
 // Get recurrences for a job
-router.get('/job/:job_uuid', getRecurrencesByJob);
+router.get('/job/:job_uuid', getRecurrencesByJobUUID);
 
 // Get single recurrence
 router.get('/:uuid', getRecurrenceByUUID);
@@ -26,5 +27,6 @@ router.patch('/:uuid/missed', missRecurrence);
 
 // Delete recurrence
 router.delete('/:uuid', deleteRecurrence);
+
 
 export default router;

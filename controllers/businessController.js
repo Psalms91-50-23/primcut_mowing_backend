@@ -1,6 +1,7 @@
 import Business from '../models/Business.js';
 import Customer from '../models/Customer.js';
-import { generateShortId, normalizeNZPhone } from "../util/util.js";
+import { createChangeLogSafe } from '../util/createChangeLogSafe.js';
+import { normalizeNZPhone, generatePrefixedId } from "../util/util.js";
 
 const getAllBusinesses = async (req, res) => {
   try {
@@ -14,10 +15,11 @@ const getAllBusinesses = async (req, res) => {
   }
 };
 
-//works fine 9/01/2026
+// works fine 9/01/2026
 const getBusinessByUUID = async (req, res) => {
   const { uuid } = req.params;
   if (!uuid) return res.status(400).json({ error: 'Missing business UUID' });
+
   try {
     const business = await Business.findByUUID(uuid);
     if (!business) return res.status(404).json({ error: 'Business not found' });
@@ -28,24 +30,35 @@ const getBusinessByUUID = async (req, res) => {
 };
 
 const createBusiness = async (req, res) => {
-  const { name, business_mobile_phone, business_landline_phone, email, address, customer_uuid } = req.body;
+  const actorUserUuid = req.user?.uuid || null;
+  const {
+    name,
+    business_mobile_phone,
+    business_landline_phone,
+    email,
+    address,
+    customer_uuid
+  } = req.body;
+
   console.log(req.body, " creating a business");
 
-  if(!email){
+  if (!email) {
     return res.status(400).json({ error: 'Business email are required' });
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if(!emailRegex.test(email)) return res.status(400).json({ error: 'Invalid email format' });
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
 
-  if(!name){
+  if (!name) {
     return res.status(400).json({ error: 'Business name is required' });
   }
-  if(!business_mobile_phone){
+
+  if (!business_mobile_phone) {
     return res.status(400).json({ error: 'Business phone is required' });
   }
 
-  // ---- Normalize phones ----
   const mobileNormalizedPhone = business_mobile_phone
     ? normalizeNZPhone(business_mobile_phone)
     : null;
@@ -54,15 +67,16 @@ const createBusiness = async (req, res) => {
     ? normalizeNZPhone(business_landline_phone)
     : null;
 
-  if(!address){
+  if (!address) {
     return res.status(400).json({ error: 'Business address is required' });
   }
 
   let uuid;
   let exists;
+
   try {
     do {
-      uuid = generateShortId(9);
+      uuid = generatePrefixedId(8, "B");
       exists = await Business.findByUUID(uuid);
     } while (exists);
 
@@ -71,23 +85,65 @@ const createBusiness = async (req, res) => {
       if (!customer) {
         return res.status(404).json({ error: 'Customer not found' });
       }
-      const linkedBusiness = await Customer.findByUUIDAndUpdate(customer_uuid, { customer_type:"business" });
-      console.log({ linkedBusiness });
+
+      const linkedCustomer = await Customer.findByUUIDAndUpdate(customer_uuid, {
+        customer_type: "business"
+      });
+      console.log({ linkedCustomer });
     }
 
     const newBusinessData = {
       uuid,
       name,
-      business_mobile_phone: mobileNormalizedPhone ? mobileNormalizedPhone : null,
-      business_landline_phone: landlineNormalizedPhone ? landlineNormalizedPhone : null,
+      business_mobile_phone: mobileNormalizedPhone || null,
+      business_landline_phone: landlineNormalizedPhone || null,
       email,
       address,
-      customer_uuid: customer_uuid ? customer_uuid : null
+      customer_uuid: customer_uuid || null
     };
 
     const newBusiness = await Business.create(newBusinessData);
 
-    return res.status(201).json({message: 'Business created successfully', data: newBusiness});
+    await createChangeLogSafe({
+      table_name: "businesses",
+      record_uuid: newBusiness.uuid,
+      user_uuid: actorUserUuid,
+      action: "create",
+      summary: "Business created.",
+      changed_fields: {
+        uuid: newBusiness.uuid,
+        name: newBusiness.name,
+        business_mobile_phone: newBusiness.business_mobile_phone,
+        business_landline_phone: newBusiness.business_landline_phone,
+        email: newBusiness.email,
+        address: newBusiness.address,
+        customer_uuid: newBusiness.customer_uuid,
+      },
+      source: "dashboard",
+    });
+
+    if (customer_uuid) {
+      await createChangeLogSafe({
+        table_name: "customers",
+        record_uuid: customer_uuid,
+        user_uuid: actorUserUuid,
+        action: "update",
+        summary: "Customer linked to business and customer type updated to business.",
+        changed_fields: {
+          customer_type: {
+            old: "individual",
+            new: "business",
+          },
+          linked_business_uuid: newBusiness.uuid,
+        },
+        source: "dashboard",
+      });
+    }
+
+    return res.status(201).json({
+      message: 'Business created successfully',
+      data: newBusiness
+    });
   } catch (error) {
     console.error('Error creating business:', error);
     return res.status(500).json({ error: error.message });
@@ -95,56 +151,83 @@ const createBusiness = async (req, res) => {
 };
 
 const updateBusinessByUUID = async (req, res) => {
+  const actorUserUuid = req.user?.uuid || null;
   const { uuid } = req.params;
-  let updates = {...req.body};
+  let updates = { ...req.body };
 
   if (!uuid) return res.status(400).json({ error: 'Missing business UUID' });
 
   try {
-
     const foundBusiness = await Business.findByUUID(uuid);
     if (!foundBusiness) {
       return res.status(404).json({ error: 'Business not found' });
     }
 
-    if(updates.email && updates.email !== foundBusiness.email){
+    if (updates.email && updates.email !== foundBusiness.email) {
       const emailExists = await Business.findeByEmail(updates.email);
-      if(emailExists) return res.status(400).json({ error: 'Email already exists' });
+      if (emailExists) return res.status(400).json({ error: 'Email already exists' });
     }
 
-    if(updates.business_landline_phone && updates.business_landline_phone !== foundBusiness.business_landline_phone){
-
+    if (
+      updates.business_landline_phone &&
+      updates.business_landline_phone !== foundBusiness.business_landline_phone
+    ) {
       updates.business_landline_phone = normalizeNZPhone(updates.business_landline_phone);
 
-       const existsLandline = await Customer.findByPhone(null, updates.business_landline_phone);
-        if (existsLandline && existsLandline.uuid !== foundBusiness.uuid) {
-            return res.status(400).json({ error: 'Landline phone already exists' });
-        }
+      const existsLandline = await Customer.findByPhone(null, updates.business_landline_phone);
+      if (existsLandline && existsLandline.uuid !== foundBusiness.uuid) {
+        return res.status(400).json({ error: 'Landline phone already exists' });
+      }
+    }
 
-    } 
-
-    if(updates.business_mobile_phone && updates.business_mobile_phone !== foundBusiness.business_mobile_phone){
+    if (
+      updates.business_mobile_phone &&
+      updates.business_mobile_phone !== foundBusiness.business_mobile_phone
+    ) {
       updates.business_mobile_phone = normalizeNZPhone(updates.business_mobile_phone);
 
-       const existsMobile = await Customer.findByPhone(updates.business_mobile_phone, null);
-        if (existsMobile && existsMobile.uuid !== foundBusiness.uuid) { 
-            return res.status(400).json({ error: 'Mobile phone already exists' });
-        }
-
-    } 
+      const existsMobile = await Customer.findByPhone(updates.business_mobile_phone, null);
+      if (existsMobile && existsMobile.uuid !== foundBusiness.uuid) {
+        return res.status(400).json({ error: 'Mobile phone already exists' });
+      }
+    }
 
     const updated = await Business.findByUUIDAndUpdate(uuid, updates);
-    return res.status(200).json({...updated});
+
+    const changedFields = {};
+
+    for (const key of Object.keys(updates)) {
+      changedFields[key] = {
+        old: foundBusiness[key] ?? null,
+        new: updated[key] ?? updates[key] ?? null,
+      };
+    }
+
+    if (Object.keys(changedFields).length > 0) {
+      await createChangeLogSafe({
+        table_name: "businesses",
+        record_uuid: uuid,
+        user_uuid: actorUserUuid,
+        action: "update",
+        summary: "Business updated.",
+        changed_fields: changedFields,
+        source: "dashboard",
+      });
+    }
+
+    return res.status(200).json({ ...updated });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
 
 const softDeleteBusiness = async (req, res) => {
+  const actorUserUuid = req.user?.uuid || null;
   const { uuid } = req.params;
-  if (!uuid) return res.status(400).json({ error: "Business UUID is required" });
-  try {
 
+  if (!uuid) return res.status(400).json({ error: "Business UUID is required" });
+
+  try {
     const business = await Business.findByUUID(uuid);
     if (!business) {
       return res.status(404).json({ error: 'Business not found' });
@@ -153,24 +236,72 @@ const softDeleteBusiness = async (req, res) => {
     const deleted = await Business.softDelete(uuid);
     console.info(`Business ${uuid} soft-deleted at ${new Date().toISOString()}`);
 
-    return res.status(200).json({ message: 'Business soft-deleted successfully', data: deleted });
+    await createChangeLogSafe({
+      table_name: "businesses",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "delete",
+      summary: "Business soft deleted.",
+      changed_fields: {
+        is_deleted: {
+          old: business.is_deleted ?? false,
+          new: deleted.is_deleted ?? true,
+        },
+        deleted_at: {
+          old: business.deleted_at ?? null,
+          new: deleted.deleted_at ?? new Date().toISOString(),
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: 'Business soft-deleted successfully',
+      data: deleted
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
 const reinstateBusiness = async (req, res) => {
+  const actorUserUuid = req.user?.uuid || null;
   const { uuid } = req.params;
+
   if (!uuid) return res.status(400).json({ error: "Business UUID is required" });
+
   try {
     const foundBusiness = await Business.findByUUID(uuid);
     if (!foundBusiness) {
       return res.status(404).json({ error: 'Business not found' });
     }
+
     const businessReinstated = await Business.reinstate(uuid);
     console.info(`Business ${uuid} reinstated by user ${req.user?.id || 'unknown'} at ${new Date().toISOString()}`);
 
-    return res.status(200).json({ message: 'Business reinstated successfully', data: businessReinstated });
+    await createChangeLogSafe({
+      table_name: "businesses",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "update",
+      summary: "Business reinstated.",
+      changed_fields: {
+        is_deleted: {
+          old: foundBusiness.is_deleted ?? true,
+          new: businessReinstated.is_deleted ?? false,
+        },
+        deleted_at: {
+          old: foundBusiness.deleted_at ?? null,
+          new: businessReinstated.deleted_at ?? null,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: 'Business reinstated successfully',
+      data: businessReinstated
+    });
   } catch (error) {
     console.error(`Error reinstating business ${uuid}:`, error);
     return res.status(500).json({ error: error.message });
@@ -178,18 +309,46 @@ const reinstateBusiness = async (req, res) => {
 };
 
 const hardDeleteBusiness = async (req, res) => {
+  const actorUserUuid = req.user?.uuid || null;
   const { uuid } = req.params;
+
   try {
     const foundBusiness = await Business.findByUUID(uuid);
     if (!foundBusiness) {
       return res.status(404).json({ error: 'Business not found' });
     }
-   const deleted = await Business.delete(uuid);
-   console.log({deleted})
+
+    const deleted = await Business.delete(uuid);
+    console.log({ deleted });
+
     if (!deleted) {
       return res.status(500).json({ error: 'Failed to delete business' });
     }
-    return res.status(200).json({ message: 'Business deleted successfully', data: deleted });
+
+    await createChangeLogSafe({
+      table_name: "businesses",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "delete",
+      summary: "Business hard deleted.",
+      changed_fields: {
+        deleted_record: {
+          uuid: foundBusiness.uuid,
+          name: foundBusiness.name,
+          business_mobile_phone: foundBusiness.business_mobile_phone,
+          business_landline_phone: foundBusiness.business_landline_phone,
+          email: foundBusiness.email,
+          address: foundBusiness.address,
+          customer_uuid: foundBusiness.customer_uuid,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: 'Business deleted successfully',
+      data: deleted
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -209,21 +368,21 @@ const getBusinessByName = async (req, res) => {
 };
 
 const getBusinessByEmail = async (req, res) => {
-    const { email } = req.params;
-    if (!email) {
-        return res.status(400).json({ error: 'Missing business email' });
-    }
-    try {
-        const business = await Business.findeByEmail(email);
-        if (!business || business.length === 0) {
-            return res.status(404).json({ error: `Business not found with email ${email}` });
-        }
-        return res.status(200).json(business);
-    } catch (error) {
-        return res.status(500).json({ error: error.message });
-    }
-}
+  const { email } = req.params;
+  if (!email) {
+    return res.status(400).json({ error: 'Missing business email' });
+  }
 
+  try {
+    const business = await Business.findeByEmail(email);
+    if (!business || business.length === 0) {
+      return res.status(404).json({ error: `Business not found with email ${email}` });
+    }
+    return res.status(200).json(business);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 export {
   getAllBusinesses,

@@ -24,7 +24,8 @@ import {
     // sendPasswordResetEmail,
     getUserByEmail,
     checkCookiesExists,
-    createUserEmptyEmployee
+    createUserEmptyEmployee,
+    getUserByAuthUserId
 
 } from '../controllers/userController.js';
 
@@ -35,7 +36,7 @@ router.get('/test', requireAuth, (req, res) => {
 });
 
 router.get('/all', getUsers);
-router.get('/auth/me', requireAuth, getCurrentUser);
+router.get('/auth/me', requireAuth, authenticatedRateLimit, requireRole(["admin","owner", "employee", "customer"]), getCurrentUser);
 // router.get('/auth/check', requireAuth, checkCookiesExists);
 router.get('/auth/check', checkCookiesExists);
 router.post('/auth/login', authRateLimit, login);
@@ -48,10 +49,12 @@ router.post('/register', registerUser);
 router.post('/verify', verifyEmail);
 router.post('/resend-verify-email', resendVerificationEmail);
 router.patch('/:uuid', updateUser);
+router.get('/auth-user/:authUserId', getUserByAuthUserId);
 router.delete('/admin/hard-delete/uuid/:uuid', requireAuth, requireRole(["admin","owner"]), hardDeleteFull);
 router.delete('/admin/supabase-user/hard-delete', requireAuth, requireRole(["admin","owner"]), deleteUserByEmail);
 router.delete('/supabase-user/:authUserId', deleteSupabaseUser);
 router.delete('/hard-delete-local/uuid/:uuid', hardDeleteUserLocally);
+
 
 
 
