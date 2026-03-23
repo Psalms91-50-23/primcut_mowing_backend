@@ -25,6 +25,7 @@ import termsAndConditionsRouter from "./routes/termsAndConditionsRouter.js";
 import quoteTermsAcceptanceRouter from "./routes/quoteTermsAcceptanceRouter.js";
 // Middleware
 import { errorHandler } from './middleware/error.middleware.js';
+import inquiryRouter from "./routes/inquiryRouter.js";
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use('/api/verify-recaptcha-v3', verifyRecaptchaV3Router);
 app.use('/api/verify-recaptcha-v2', verifyRecaptchaV2Router);
 app.use("/api/terms-and-conditions", termsAndConditionsRouter);
 app.use("/api/quote-terms-acceptances", quoteTermsAcceptanceRouter);
+app.use("/api/inquiries", inquiryRouter);
 
 // Global error handler (last)
 app.use(errorHandler);

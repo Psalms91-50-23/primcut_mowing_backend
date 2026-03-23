@@ -60,7 +60,7 @@ export const createCustomerContact = async (req, res) => {
     }
 
     const contact = await CustomerContact.create({
-      uuid: generatePrefixedId("CC"),
+      uuid: generatePrefixedId("CC", 7),
       customer_uuid,
       first_name: cleanText(first_name),
       last_name: cleanText(last_name),

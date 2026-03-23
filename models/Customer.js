@@ -748,6 +748,134 @@ class Customer {
     }
     return data || [];
   }
+  
+//   returns for below function{
+//   ...customerFields,
+//   quotes: [...],
+//   jobs: [
+//     {
+//       ...jobFields,
+//       job_recurrences: [...]
+//     }
+//   ],
+//   inquiries: [...],
+//   user: { ... } || null
+// }
+  static async findFullProfileByUUID(uuid) {
+    if (!uuid) throw new Error("Customer UUID is required");
+
+    // 1. Customer
+    const { data: customer, error: customerError } = await supabase
+        .from("customers")
+        .select("*")
+        .eq("uuid", uuid)
+        .eq("is_deleted", false)
+        .maybeSingle();
+
+    if (customerError) {
+        throw new Error(`Error fetching customer ${uuid}: ${customerError.message}`);
+    }
+
+    if (!customer) return null;
+
+    // 2. Quotes
+    const { data: quotes, error: quotesError } = await supabase
+        .from("quotes")
+        .select("*")
+        .eq("customer_uuid", uuid)
+        .eq("is_deleted", false)
+        .order("created_at", { ascending: false });
+
+    if (quotesError) {
+        throw new Error(`Error fetching quotes for customer ${uuid}: ${quotesError.message}`);
+    }
+
+    // 3. Jobs
+    const { data: jobs, error: jobsError } = await supabase
+        .from("jobs")
+        .select("*")
+        .eq("customer_uuid", uuid)
+        .eq("is_deleted", false)
+        .order("created_at", { ascending: false });
+
+    if (jobsError) {
+        throw new Error(`Error fetching jobs for customer ${uuid}: ${jobsError.message}`);
+    }
+
+    const safeJobs = jobs || [];
+    const jobUuids = safeJobs.map((job) => job.uuid);
+
+    // 4. Recurrences for all jobs
+    let recurrences = [];
+    if (jobUuids.length > 0) {
+        const { data: recurrenceData, error: recurrencesError } = await supabase
+        .from("job_recurrences")
+        .select("*")
+        .in("job_uuid", jobUuids)
+        .eq("is_deleted", false)
+        .order("scheduled_at", { ascending: true });
+
+        if (recurrencesError) {
+        throw new Error(`Error fetching recurrences for customer ${uuid}: ${recurrencesError.message}`);
+        }
+
+        recurrences = recurrenceData || [];
+    }
+
+    const recurrencesByJobUUID = new Map();
+    for (const recurrence of recurrences) {
+        const key = recurrence.job_uuid;
+        if (!recurrencesByJobUUID.has(key)) {
+        recurrencesByJobUUID.set(key, []);
+        }
+        recurrencesByJobUUID.get(key).push(recurrence);
+    }
+
+    const jobsWithRecurrences = safeJobs.map((job) => ({
+        ...job,
+        job_recurrences: recurrencesByJobUUID.get(job.uuid) || [],
+    }));
+
+    // 5. Inquiries
+    const { data: inquiries, error: inquiriesError } = await supabase
+        .from("inquiries")
+        .select("*")
+        .eq("customer_uuid", uuid)
+        .order("created_at", { ascending: false });
+
+    if (inquiriesError) {
+        throw new Error(`Error fetching inquiries for customer ${uuid}: ${inquiriesError.message}`);
+    }
+
+    // 6. Linked user (if one exists)
+    const { data: user, error: userError } = await supabase
+        .from("users")
+        .select(`
+        uuid,
+        auth_user_id,
+        customer_uuid,
+        first_name,
+        last_name,
+        email,
+        role,
+        created_at,
+        updated_at
+        `)
+        .eq("customer_uuid", uuid)
+        .maybeSingle();
+
+    if (userError) {
+        throw new Error(`Error fetching linked user for customer ${uuid}: ${userError.message}`);
+    }
+
+    return {
+        ...customer,
+        quotes: quotes || [],
+        jobs: jobsWithRecurrences,
+        inquiries: inquiries || [],
+        user: user || null,
+    };
+    }
 
 }
 

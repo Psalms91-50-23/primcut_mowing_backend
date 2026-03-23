@@ -112,7 +112,7 @@ const createCustomer = async (req, res) => {
     let uuid;
     let exists;
     do {
-      uuid = generatePrefixedId(8, "C");
+      uuid = generatePrefixedId("C", 7);
       exists = await Customer.findByUUID(uuid);
     } while (exists);
 
@@ -713,21 +713,16 @@ const getOneCustomersWithDetails = async (req, res) => {
 export const getMyCustomer = async (req, res) => {
   try {
     const authUser = req.user;
-
+    
     if (!authUser?.uuid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-
-    let customer = null;
-
+    
     if (authUser.customer_uuid) {
-      customer = await Customer.findByUUID(authUser.customer_uuid);
+      return res.status(404).json({ error: "Customer not found" });
     }
-
-    if (!customer) {
-      customer = await Customer.findByUserUUID(authUser.uuid);
-    }
-
+  
+    const customer = await Customer.findByUUID(authUser.customer_uuid);
     if (!customer) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -813,6 +808,33 @@ const getCustomerContacts = async (req, res) => {
 
 }
 
+const getCustomerFullProfileByUUID = async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    if (!uuid) {
+      return res.status(400).json({ error: "Customer UUID is required" });
+    }
+
+    const customer = await Customer.findFullProfileByUUID(uuid);
+
+    if (!customer) {
+      return res.status(404).json({ error: "Customer not found" });
+    }
+
+    return res.status(200).json({
+      message: "Customer profile fetched successfully",
+      data: customer,
+    });
+  } catch (error) {
+    console.error("getCustomerFullProfileByUUID error:", error);
+    return res.status(500).json({
+      error: "Failed to fetch customer profile",
+      details: error?.message || "Unknown error",
+    });
+  }
+};
+
 export {
   getAllCustomers,
   createCustomer,
@@ -834,5 +856,6 @@ export {
   getCustomerDetailedByUUID,
   getCustomerQuotes,
   getCustomerJobsAndRecurrences,
-  getCustomerContacts
+  getCustomerContacts,
+  getCustomerFullProfileByUUID
 };

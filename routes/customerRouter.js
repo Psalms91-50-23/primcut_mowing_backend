@@ -20,7 +20,8 @@ import {
     getCustomerQuotes,
     getCustomerJobsAndRecurrences,
     getCustomerContacts,
-    getMyCustomer
+    getMyCustomer,
+    getCustomerFullProfileByUUID
 } from '../controllers/customerController.js';
 
 import {
@@ -96,5 +97,7 @@ router.patch('/uuid/:customer_uuid/link-business', linkCustomerToBusiness);
 router.get("/:uuid/summary", getCustomerSummaryByUUID);
 
 router.get("/:uuid/details", getCustomerDetailedByUUID);
+
+router.get("/:uuid/full-profile", getCustomerFullProfileByUUID);
 
 export default router;

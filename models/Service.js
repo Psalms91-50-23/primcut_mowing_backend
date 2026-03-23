@@ -20,6 +20,22 @@ class Service {
     return data || [];
   }
 
+  static async getAllCategory() {
+    const { data, error } = await supabase
+      .from(this.tableName)
+      .select("category")
+      .eq("is_active", true)
+      .eq("is_deleted", false)
+      .order("category", { ascending: true })
+      .order("label", { ascending: true });
+
+    if (error) {
+      throw new Error(`Error fetching services: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
   static async getByUUID(uuid) {
     if (!uuid) throw new Error("uuid is required");
 
@@ -51,6 +67,8 @@ class Service {
 
     return data;
   }
+
+
 }
 
 export default Service;

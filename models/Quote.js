@@ -962,6 +962,3 @@ export default class Quote {
         };
     }
 }
-
-
-

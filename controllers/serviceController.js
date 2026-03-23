@@ -15,6 +15,26 @@ export const getAllServices = async (req, res) => {
   }
 };
 
+export const getAllServiceCategories = async (req, res) => {
+  try {
+    const categories = await Service.getAllCategory();
+
+    // Extract unique categories
+    const uniqueCategories = [
+      ...new Set(categories.map((item) => item.category)),
+    ];
+
+    return res.status(200).json({
+      data: uniqueCategories,
+    });
+  } catch (error) {
+    console.error("getAllServiceCategories error:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch service categories",
+    });
+  }
+}
+
 export const getServiceByUUID = async (req, res) => {
   try {
     const { uuid } = req.params;
