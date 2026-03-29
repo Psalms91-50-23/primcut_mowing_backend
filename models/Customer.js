@@ -1,5 +1,5 @@
 import supabase from '../config/db.js';
-
+import { getQuotePdfPublicUrl } from '../util/getQuotePdfPublicUrl.js';
 function buildSearchOr(terms, columns) {
   const filters = [];
 
@@ -15,24 +15,116 @@ function buildSearchOr(terms, columns) {
   return filters.join(",");
 }
 
-class Customer {
+export default class Customer {
 
+    static async countAllActive() {
+
+        const { count, error } = await supabase
+            .from("customers")
+            .select("*", { count: "exact", head: true })
+            .is("deleted_at", null);
+
+        if (error) {
+            throw new Error(`Error counting customers: ${error.message}`);
+        }
+
+        return count || 0;
+    }
+
+    static async findCustomerByUUID (uuid) {
+        const { data, error } = await supabase
+            .from("customers")
+            .select("*")
+            .eq("uuid", uuid)
+            .is("deleted_at", null)
+            .single();
+
+        if (error) {
+            throw new Error(error.message);
+        }
+
+        return data;
+    };
+    
     static async findQuotesByCustomerUUID(uuid) {
         if (!uuid) {
             throw new Error("Customer UUID is required");
         }
+
         const { data, error } = await supabase
-            .from('quotes')
-            .select('*')
-            .eq('customer_uuid', uuid)
+            .from("quotes")
+            .select("*")
+            .eq("customer_uuid", uuid)
             .eq("is_deleted", false)
-            .order('created_at', { ascending: false });
+            .order("created_at", { ascending: false });
 
         if (error) {
-            throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
+            throw new Error(
+            `Error fetching quotes for customer with UUID ${uuid}: ${error.message}`
+            );
         }
-        return data;
+
+        const normalizedQuotes = await Promise.all(
+            (data || []).map(async (quote) => {
+            const rawPath =
+                typeof quote.quote_pdf_storage_path === "string" &&
+                quote.quote_pdf_storage_path.trim()
+                ? quote.quote_pdf_storage_path
+                : typeof quote.quote_pdf_url === "string" &&
+                    quote.quote_pdf_url.trim()
+                ? quote.quote_pdf_url
+                : null;
+                
+            return {
+                ...quote,
+                quote_pdf_storage_path: rawPath,
+                quote_pdf_url: await getQuotePdfPublicUrl(rawPath), // ✅ FIX
+            };
+            })
+        );
+
+        return normalizedQuotes;
+
     }
+    // static async findQuotesByCustomerUUID(uuid) {
+    //     if (!uuid) {
+    //         throw new Error("Customer UUID is required");
+    //     }
+    //     const { data, error } = await supabase
+    //         .from('quotes')
+    //         .select('*')
+    //         .eq('customer_uuid', uuid)
+    //         .eq("is_deleted", false)
+    //         .order('created_at', { ascending: false });
+
+    //     if (error) {
+    //         throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
+    //     }
+
+    //     const normalizedQuotes = (data || []).map((quote) => ({
+    //         ...quote,
+    //         quote_pdf_storage_path: quote.quote_pdf_url || null,
+    //         quote_pdf_url: getQuotePdfPublicUrl(quote.quote_pdf_url),
+    //     }));
+
+    //     return normalizedQuotes;
+    // }
+    // static async findQuotesByCustomerUUID(uuid) {
+    //     if (!uuid) {
+    //         throw new Error("Customer UUID is required");
+    //     }
+    //     const { data, error } = await supabase
+    //         .from('quotes')
+    //         .select('*')
+    //         .eq('customer_uuid', uuid)
+    //         .eq("is_deleted", false)
+    //         .order('created_at', { ascending: false });
+
+    //     if (error) {
+    //         throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
+    //     }
+    //     return data;
+    // }
 
     static async findJobsByCustomerUUID(uuid) {
         if (!uuid) {
@@ -878,5 +970,3 @@ class Customer {
     }
 
 }
-
-export default Customer;

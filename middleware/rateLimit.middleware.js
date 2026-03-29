@@ -60,7 +60,7 @@ export const authRateLimit = createRateLimit({
 
 export const publicRateLimit = createRateLimit({
   windowMs: 60_000, // 1 minute
-  max: 10,
+  max: 20,
   keyGenerator: (req) => {
     const token = req.query.token || 'no-token';
     return `quote:${req.ip}:${token.slice(0, 8)}`;

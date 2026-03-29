@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from '../middleware/auth.middleware.js';
 import { requireRole } from '../middleware/role.middleware.js';
+import multer from "multer";
 import {
   authRateLimit,
   publicRateLimit,
@@ -27,7 +28,8 @@ import {
     restoreQuote,
     getQuoteSummaryByUUID,
     getQuoteDetailedByUUID,
-    linkCustomerToQuote 
+    linkCustomerToQuote,
+    getQuotesByCustomerUUID 
     
 } from "../controllers/quoteController.js";
 import { viewQuotePdf } from "../controllers/viewQuotePdfController.js";
@@ -37,6 +39,21 @@ import {
 } from "../controllers/quoteAccessTokenController.js"
 
 const router = express.Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 10,
+    fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype?.startsWith("image/")) {
+      return cb(null, true);
+    }
+    return cb(new Error("Only image uploads are allowed"));
+  },
+});
+
 // GET quotes with pagination and filtering
 router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin","employee"]), getQuotes);
 //PDF route for quote
@@ -50,10 +67,16 @@ router.get("/id/:id", getQuoteById);
 // router.get('/api/quotes/public', viewPublicQuote);
 
 // GET quote by UUID
+// router.get("/uuid/:uuid", getQuoteByUUID);
 router.get("/uuid/:uuid", requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
 
 // GET quote by UUID
 router.get("/customer/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteByUUID);
+//original incase we need it at bottom
+
+// GET quote by customer UUID
+router.get("/customer/:uuid", getQuotesByCustomerUUID);
+// router.get("/customer/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuotesByCustomerUUID);
 
 //Auto update quote status to expired
 router.patch("/public/customer/uuid/:uuid", publicRateLimit,  autoExpireQuote);
@@ -68,7 +91,12 @@ router.patch("/employee/uuid/:uuid", requireAuth, authenticatedRateLimit, requir
 router.patch("/id/:id", updateQuoteById);
 
 // CREATE quote
-router.post("/create", createQuote);
+router.post(
+  "/create",
+  upload.array("images", 10),
+  createQuote
+);
+// router.post("/create", createQuote);
 
 // ACCEPT quote
 router.patch("/public/accept/uuid/:uuid", acceptQuote)

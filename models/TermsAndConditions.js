@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import supabase from '../config/db.js';
 
 /**
  * TermsAndConditions Model
@@ -58,13 +58,27 @@ class TermsAndConditions {
     title,
     content,
     short_summary = null,
+    effective_date = null,
     pdf_url = null,
+    pdf_storage_path = null,
     is_active = false,
   }) {
     const now = new Date().toISOString();
 
     if (!uuid) {
       throw new Error("Terms and conditions UUID is required");
+    }
+
+    if (!version) {
+      throw new Error("Version is required");
+    }
+
+    if (!title) {
+      throw new Error("Title is required");
+    }
+
+    if (!content) {
+      throw new Error("Content is required");
     }
 
     const payload = {
@@ -74,9 +88,14 @@ class TermsAndConditions {
       content,
       short_summary,
       pdf_url,
+      pdf_storage_path,
       is_active,
       created_at: now,
     };
+
+    if (effective_date) {
+      payload.effective_date = effective_date;
+    }
 
     const { data, error } = await supabase
       .from(this.tableName)
@@ -90,6 +109,59 @@ class TermsAndConditions {
 
     return data;
   }
+  
+  // static async create({
+  //   uuid,
+  //   version,
+  //   title,
+  //   content,
+  //   short_summary = null,
+  //   pdf_url = null,
+  //   pdf_storage_path = null,
+  //   is_active = false,
+  // }) {
+  //   const now = new Date().toISOString();
+
+  //   if (!uuid) {
+  //     throw new Error("Terms and conditions UUID is required");
+  //   }
+
+  //   if (!version) {
+  //     throw new Error("Version is required");
+  //   }
+
+  //   if (!title) {
+  //     throw new Error("Title is required");
+  //   }
+
+  //   if (!content) {
+  //     throw new Error("Content is required");
+  //   }
+
+  //   const payload = {
+  //     uuid,
+  //     version,
+  //     title,
+  //     content,
+  //     short_summary,
+  //     pdf_url,
+  //     pdf_storage_path,
+  //     is_active,
+  //     created_at: now,
+  //   };
+
+  //   const { data, error } = await supabase
+  //     .from(this.tableName)
+  //     .insert([payload])
+  //     .select("*")
+  //     .single();
+
+  //   if (error) {
+  //     throw new Error(`Error creating terms and conditions: ${error.message}`);
+  //   }
+
+  //   return data;
+  // }
 
   static async findAll() {
     const { data, error } = await supabase
@@ -183,11 +255,14 @@ class TermsAndConditions {
       updatePayload.pdf_url = updates.pdf_url;
     }
 
+    if (updates.pdf_storage_path !== undefined) {
+      updatePayload.pdf_storage_path = updates.pdf_storage_path;
+    }
+
     if (updates.is_active !== undefined) {
       updatePayload.is_active = updates.is_active;
     }
 
-    // 🔥 Prevent empty updates
     if (Object.keys(updatePayload).length === 0) {
       throw new Error("No valid fields provided for update");
     }

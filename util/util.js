@@ -4,7 +4,6 @@ const CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwx
 const DEFAULT_LENGTH = 8;
 import jwt from 'jsonwebtoken';
 import QuoteAccessToken from '../models/QuoteAccessToken.js';
-import { RecaptchaEnterpriseServiceClient } from "@google-cloud/recaptcha-enterprise";
 import { sendQuoteToClient } from "../lib/email/index.js";
 import PDFDocument from "pdfkit";
 import path from "path";
@@ -58,14 +57,55 @@ export const getClientIp = (req) => {
 export const normalizeNZPhone = (phone) => {
   if (!phone?.trim()) return null;
 
+  // remove everything except digits
   phone = phone.replace(/\D/g, "");
 
-  // Short landlines missing leading 0
-  if (phone.length === 7 || (phone.length === 8 && /^[2-9]/.test(phone))) {
-    phone = "0" + phone;
+  // already in 64 format
+  if (phone.startsWith("64")) {
+    return "+" + phone;
   }
 
-  return "+64" + (phone.startsWith("0") ? phone.slice(1) : phone);
+  // local number starting with 0
+  if (phone.startsWith("0")) {
+    return "+64" + phone.slice(1);
+  }
+
+  // short landlines missing leading 0
+  if (phone.length === 7 || (phone.length === 8 && /^[2-9]/.test(phone))) {
+    return "+64" + phone;
+  }
+
+  // fallback (assume missing 0)
+  return "+64" + phone;
+};
+
+// export const normalizeNZPhone = (phone) => {
+//   if (!phone?.trim()) return null;
+
+//   phone = phone.replace(/\D/g, "");
+
+//   // Short landlines missing leading 0
+//   if (phone.length === 7 || (phone.length === 8 && /^[2-9]/.test(phone))) {
+//     phone = "0" + phone;
+//   }
+
+//   return "+64" + (phone.startsWith("0") ? phone.slice(1) : phone);
+// };
+
+export const obfuscatePhoneNumber = (phone) => {
+  if (!phone) return "";
+
+  const cleaned = String(phone).replace(/\s+/g, "");
+
+  if (cleaned.length <= 4) {
+    return "*".repeat(cleaned.length);
+  }
+
+  const visibleStart = cleaned.slice(0, 3);
+  const visibleEnd = cleaned.slice(-2);
+  const hiddenLength = Math.max(cleaned.length - 5, 3);
+
+  return `${visibleStart}${"*".repeat(hiddenLength)}${visibleEnd}`;
 };
 
 export const obfuscateName = (name) => {
@@ -87,6 +127,26 @@ export const obfuscateEmail = (email) => {
   const hiddenLength = local.length - visibleStart.length - visibleEnd.length;
 
   return `${visibleStart}${"*".repeat(Math.max(hiddenLength, 3))}${visibleEnd}@${domain}`;
+};
+
+export const obfuscateAddress = (address) => {
+  if (!address) return "";
+
+  const parts = String(address).split(",");
+  const firstPart = parts[0]?.trim() || "";
+
+  if (!firstPart) return "******";
+
+  const firstSpace = firstPart.indexOf(" ");
+  if (firstSpace === -1) {
+    return `${firstPart.slice(0, 2)}******`;
+  }
+
+  const houseNumber = firstPart.slice(0, firstSpace);
+  const streetName = firstPart.slice(firstSpace + 1);
+
+  const visibleStreet = streetName.slice(0, 2);
+  return `${houseNumber} ${visibleStreet}${"*".repeat(Math.max(streetName.length - 2, 4))}`;
 };
 
 // export function normalizeNZPhone(phone) {
@@ -1028,7 +1088,18 @@ export const generateQuotePDF = async (quote, customer = null) => {
   });
 };
 
+export const formatNZDate = (dateString) => {
+  const date = new Date(dateString);
 
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+};
 // Header
 // ------------------------------------------------
 // Document Meta

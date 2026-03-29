@@ -48,6 +48,25 @@ class CustomerContact {
     return data;
   }
 
+  static async findContactsByCustomerUUID(customer_uuid) {
+    if (!customer_uuid) {
+        throw new Error("Customer UUID is required");
+      }
+
+    const { data, error } = await supabase
+      .from("customer_contacts")
+      .select("*")
+      .eq("customer_uuid", customer_uuid)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to fetch customer contacts: ${error.message}`);
+    }
+
+    return data || [];
+  };
+
   static async findByUUID(uuid) {
     const { data, error } = await supabase
       .from(this.tableName)

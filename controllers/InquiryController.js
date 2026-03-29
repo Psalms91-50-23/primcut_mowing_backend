@@ -1,7 +1,7 @@
 import Inquiry from "../models/Inquiry.js";
 import Customer from "../models/Customer.js";
 import { generatePrefixedId } from "../util/util.js";
-import { normalizedEmail, normalizeNZPhone } from "../util/util.js";
+import { normalizedEmail, normalizeNZPhone, formatFullName, formatNZDate } from "../util/util.js";
 import {
   sendInquiryToBusiness,
   sendInquiryToClient
@@ -12,7 +12,7 @@ import InquiryReply from "../models/InquiryReply.js";
 export const createInquiryReply = async (req, res) => {
   try {
     const { uuid } = req.params;
-    const { reply_message, reply_subject, recipient_email } = req.body;
+    const { reply_message, recipient_email, services } = req.body;
 
     if (!uuid) {
       return res.status(400).json({ error: "Inquiry uuid is required" });
@@ -36,8 +36,7 @@ export const createInquiryReply = async (req, res) => {
       return res.status(400).json({ error: "Valid recipient email is required" });
     }
 
-    const finalSubject =
-      reply_subject?.trim() || `Re: Inquiry ${existingInquiry.uuid}`;
+    const finalSubject = `Re: [${existingInquiry.uuid}] ${formatFullName(existingInquiry.first_name, existingInquiry.last_name, false)}`;
 
     let replyUuid;
     let exists;
@@ -48,13 +47,17 @@ export const createInquiryReply = async (req, res) => {
     } while (exists);
 
     const emailResult = await sendInquiryToClient({
-      inquiryUuid: existingInquiry.uuid,
-      firstName: existingInquiry.first_name,
-      lastName: existingInquiry.last_name,
-      email: finalRecipientEmail,
-      phone: existingInquiry.phone ?? null,
+      to: finalRecipientEmail,
       subject: finalSubject,
-      message: reply_message.trim(),
+      data: {  
+        inquiryUuid: existingInquiry.uuid,
+        firstName: existingInquiry.first_name,
+        lastName: existingInquiry.last_name,
+        email: finalRecipientEmail,
+        phone: existingInquiry.phone ?? null,
+        services: finalSubject,
+        message: reply_message.trim(),
+      }
     });
 
     const createdReply = await InquiryReply.create({
@@ -92,6 +95,7 @@ export const createInquiry = async (req, res) => {
   try {
     const { firstName, lastName, email, phone, message, services } = req.body;
     console.log({services})
+    console.log(req.body)
     if (!firstName?.trim()) {
       return res.status(400).json({ error: "First name is required" });
     }
@@ -162,6 +166,9 @@ export const createInquiry = async (req, res) => {
     const inquiryLink = `${process.env.CLIENT_URL}/employee/inquiry/${inquiry.uuid}`;
 
     await sendInquiryToBusiness({
+      to:  process.env.SEND_TO_INQUIRY || "inquiries@happyproerty.co.nz",
+      subject: `[${inquiry.uuid}] ${formatFullName(inquiry.first_name, inquiry.last_name, false)} — New Inquiry`,
+      data: {
       inquiryUuid: inquiry.uuid,
       firstName: inquiry.first_name,
       lastName: inquiry.last_name,
@@ -169,8 +176,9 @@ export const createInquiry = async (req, res) => {
       phone: inquiry.phone ?? null,
       message: inquiry.message,
       services: cleanedServices, // ✅ now array
-      subject: `New Inquiry ID ${inquiry.uuid}`,
-      inquiryLink
+      inquiryLink,
+      created_at: formatNZDate(inquiry.created_at),
+      }
     });
 
     return res.status(201).json({

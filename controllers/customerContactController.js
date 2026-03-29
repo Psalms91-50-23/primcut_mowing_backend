@@ -15,16 +15,106 @@ const cleanText = (value) => {
   return trimmed || null;
 };
 
+// export const createCustomerContact = async (req, res) => {
+//   const { uuid } = req.params;
+//   const actorUserUuid = req.user?.uuid || null;
+
+//   try {
+//     if (!customer_uuid) {
+//       return res.status(400).json({ error: "Customer UUID is required" });
+//     }
+
+//     const customer = await Customer.findByUUID(uuid);
+//     if (!customer || customer.is_deleted) {
+//       return res.status(404).json({ error: "Customer not found" });
+//     }
+
+//     const {
+//       first_name,
+//       last_name,
+//       email,
+//       mobile_phone,
+//       landline_phone,
+//       role,
+//       notes,
+//       is_primary = false,
+//       is_billing_contact = false,
+//       is_site_contact = false,
+//     } = req.body || {};
+
+//     if (!cleanText(first_name)) {
+//       return res.status(400).json({ error: "First name is required" });
+//     }
+
+//     const normalizedMobile = normalizeNZPhone(mobile_phone);
+//     const normalizedLandline = normalizeNZPhone(landline_phone);
+
+//     if (!normalizedMobile && !normalizedLandline && !normalizeEmail(email)) {
+//       return res.status(400).json({
+//         error: "At least one contact method is required (email, mobile, or landline)",
+//       });
+//     }
+
+//     if (is_primary) {
+//       await CustomerContact.clearPrimaryForCustomer(uuid);
+//     }
+
+//     const contact = await CustomerContact.create({
+//       uuid: generatePrefixedId("CC", 7),
+//       customer_uuid,
+//       first_name: cleanText(first_name),
+//       last_name: cleanText(last_name),
+//       email: normalizeEmail(email),
+//       mobile_phone: normalizedMobile,
+//       landline_phone: normalizedLandline,
+//       role: cleanText(role),
+//       notes: cleanText(notes),
+//       is_primary: Boolean(is_primary),
+//       is_billing_contact: Boolean(is_billing_contact),
+//       is_site_contact: Boolean(is_site_contact),
+//       created_by_uuid: actorUserUuid,
+//     });
+
+//     await createChangeLogSafe({
+//       table_name: "customer_contacts",
+//       record_uuid: contact.uuid,
+//       user_uuid: actorUserUuid,
+//       action: "create",
+//       summary: `Created customer contact ${contact.first_name}${contact.last_name ? ` ${contact.last_name}` : ""}`,
+//       changed_fields: {
+//         customer_uuid: contact.customer_uuid,
+//         first_name: contact.first_name,
+//         last_name: contact.last_name,
+//         email: contact.email,
+//         mobile_phone: contact.mobile_phone,
+//         landline_phone: contact.landline_phone,
+//         role: contact.role,
+//         is_primary: contact.is_primary,
+//         is_billing_contact: contact.is_billing_contact,
+//         is_site_contact: contact.is_site_contact,
+//       },
+//       source: "dashboard",
+//     });
+
+//     return res.status(201).json({
+//       message: "Customer contact created successfully",
+//       contact,
+//     });
+//   } catch (err) {
+//     console.error("createCustomerContact error:", err);
+//     return res.status(500).json({ error: err.message || "Failed to create customer contact" });
+//   }
+// };
 export const createCustomerContact = async (req, res) => {
-  const { customer_uuid } = req.params;
+  const { uuid } = req.params;
   const actorUserUuid = req.user?.uuid || null;
 
   try {
-    if (!customer_uuid) {
+    if (!uuid) {
       return res.status(400).json({ error: "Customer UUID is required" });
     }
 
-    const customer = await Customer.findByUUID(customer_uuid);
+    const customer = await Customer.findByUUID(uuid);
     if (!customer || customer.is_deleted) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -46,25 +136,26 @@ export const createCustomerContact = async (req, res) => {
       return res.status(400).json({ error: "First name is required" });
     }
 
+    const normalizedEmail = normalizeEmail(email);
     const normalizedMobile = normalizeNZPhone(mobile_phone);
     const normalizedLandline = normalizeNZPhone(landline_phone);
 
-    if (!normalizedMobile && !normalizedLandline && !normalizeEmail(email)) {
+    if (!normalizedEmail && !normalizedMobile && !normalizedLandline) {
       return res.status(400).json({
         error: "At least one contact method is required (email, mobile, or landline)",
       });
     }
 
     if (is_primary) {
-      await CustomerContact.clearPrimaryForCustomer(customer_uuid);
+      await CustomerContact.clearPrimaryForCustomer(uuid);
     }
 
     const contact = await CustomerContact.create({
       uuid: generatePrefixedId("CC", 7),
-      customer_uuid,
+      customer_uuid: uuid,
       first_name: cleanText(first_name),
       last_name: cleanText(last_name),
-      email: normalizeEmail(email),
+      email: normalizedEmail,
       mobile_phone: normalizedMobile,
       landline_phone: normalizedLandline,
       role: cleanText(role),
@@ -102,31 +193,52 @@ export const createCustomerContact = async (req, res) => {
     });
   } catch (err) {
     console.error("createCustomerContact error:", err);
-    return res.status(500).json({ error: err.message || "Failed to create customer contact" });
+    return res.status(500).json({
+      error: err.message || "Failed to create customer contact",
+    });
   }
 };
 
+// export const getCustomerContacts = async (req, res) => {
+//   const { uuid } = req.params;
+
+//   try {
+//     if (!uuid) {
+//       return res.status(400).json({ error: "Customer UUID is required" });
+//     }
+
+//     const customer = await Customer.findByUUID(uuid);
+//     if (!customer || customer.is_deleted) {
+//       return res.status(404).json({ error: "Customer not found" });
+//     }
+
+//     const contacts = await CustomerContact.findAllByCustomerUUID(customer.uuid);
+
+//     return res.status(200).json({
+//       contacts,
+//     });
+//   } catch (err) {
+//     console.error("getCustomerContacts error:", err);
+//     return res.status(500).json({ error: err.message || "Failed to fetch customer contacts" });
+//   }
+// };
+
 export const getCustomerContacts = async (req, res) => {
-  const { customer_uuid } = req.params;
+  const { uuid } = req.params;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Customer UUID is required" });
+  }
 
   try {
-    if (!customer_uuid) {
-      return res.status(400).json({ error: "Customer UUID is required" });
-    }
-
-    const customer = await Customer.findByUUID(customer_uuid);
-    if (!customer || customer.is_deleted) {
-      return res.status(404).json({ error: "Customer not found" });
-    }
-
-    const contacts = await CustomerContact.findAllByCustomerUUID(customer_uuid);
-
+    const contacts = await CustomerContact.findContactsByCustomerUUID(uuid);
+    console.log({contacts})
     return res.status(200).json({
-      contacts,
+      contacts: contacts || [],
     });
   } catch (err) {
     console.error("getCustomerContacts error:", err);
-    return res.status(500).json({ error: err.message || "Failed to fetch customer contacts" });
+    return res.status(500).json({ error: "Failed to fetch contacts" });
   }
 };
 
@@ -138,7 +250,8 @@ export const getCustomerContactByUUID = async (req, res) => {
       return res.status(400).json({ error: "Contact UUID is required" });
     }
 
-    const contact = await CustomerContact.findByUUID(uuid);
+    const contact = await CustomerContact.findAllByCustomerUUID(uuid);
+    console.log({contact})
     if (!contact) {
       return res.status(404).json({ error: "Customer contact not found" });
     }

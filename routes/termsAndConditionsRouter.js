@@ -20,7 +20,7 @@ import { requireRole } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // Public / customer-safe route
-router.get("/active", getActiveTermsAndConditions);
+router.get("/active", publicRateLimit, getActiveTermsAndConditions);
 
 // Admin / dashboard routes
 router.get("/", getAllTermsAndConditions);

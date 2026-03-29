@@ -1,13 +1,14 @@
 import supabase from "../config/db.js";
 
 class Service {
-    
   static tableName = "services";
 
   static async getAllActive() {
     const { data, error } = await supabase
       .from(this.tableName)
-      .select("uuid, code, label, description, category, requires_images")
+      .select(
+        "uuid, code, label, description, category, requires_images, urgent_allowed"
+      )
       .eq("is_active", true)
       .eq("is_deleted", false)
       .order("category", { ascending: true })
@@ -41,7 +42,9 @@ class Service {
 
     const { data, error } = await supabase
       .from(this.tableName)
-      .select("uuid, code, label, description, category, is_active, created_at, updated_at")
+      .select(
+        "uuid, code, label, description, category, requires_images, urgent_allowed, is_active, is_deleted, created_at, updated_at"
+      )
       .eq("uuid", uuid)
       .single();
 
@@ -57,7 +60,9 @@ class Service {
 
     const { data, error } = await supabase
       .from(this.tableName)
-      .select("uuid, code, label, description, category, is_active, created_at, updated_at")
+      .select(
+        "uuid, code, label, description, category, requires_images, urgent_allowed, is_active, is_deleted, created_at, updated_at"
+      )
       .eq("code", code)
       .single();
 
@@ -67,8 +72,6 @@ class Service {
 
     return data;
   }
-
-
 }
 
 export default Service;

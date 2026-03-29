@@ -1,18 +1,15 @@
 import crypto from "crypto";
 import supabase from "../config/db.js";
 
-function generatePrefixedUUID(prefix = "QTA") {
-  return `${prefix}${crypto.randomBytes(5).toString("base64url")}`;
-}
-
 class QuoteTermsAcceptance {
+
   static async create(payload) {
     if (!payload) {
       throw new Error("Acceptance payload is required");
     }
 
     const acceptance = {
-      uuid: payload.uuid || generatePrefixedUUID(),
+      uuid: payload.uuid,
       quote_uuid: payload.quote_uuid,
       terms_uuid: payload.terms_uuid,
       version: payload.version,
@@ -21,6 +18,10 @@ class QuoteTermsAcceptance {
       user_agent: payload.user_agent || null,
       created_at: payload.created_at || new Date().toISOString(),
     };
+
+    if (!acceptance.uuid) {
+      throw new Error("uuid is required");
+    }
 
     if (!acceptance.quote_uuid) {
       throw new Error("quote_uuid is required");
@@ -136,6 +137,33 @@ class QuoteTermsAcceptance {
 
     return !!data;
   }
+
+  static async findByQuoteAndVersion(quoteUUID, version) {
+    if (!quoteUUID) {
+      throw new Error("Quote uuid is required");
+    }
+
+    if (!version) {
+      throw new Error("Version is required");
+    }
+
+    const { data, error } = await supabase
+      .from("quote_terms_acceptances")
+      .select("*")
+      .eq("quote_uuid", quoteUUID)
+      .eq("version", version)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(
+        `Error finding quote terms acceptance by quote and version: ${error.message}`
+      );
+    }
+
+    return data || null;
+  }
+
 }
 
 export default QuoteTermsAcceptance;

@@ -11,6 +11,7 @@ import jobRecurrenceRouter from './routes/jobRecurrenceRouter.js';
 import changeLogRouter from './routes/changeLogRouter.js';
 import userRouter from './routes/userRouter.js';
 import quoteAccessTokenRouter from "./routes/quoteAccessTokenRouter.js";
+import jobAccessTokenRouter from "./routes/jobAccessTokenRouter.js";
 import employeeRouter from './routes/employeeRouter.js';
 import passwordResetRoutes from './routes/passwordResetTokenRouter.js';
 import verifyRecaptchaV3Router from './routes/verifyRecaptchaV3Router.js';
@@ -20,6 +21,7 @@ import searchRouter from "./routes/searchRouter.js";
 import jobBackfillRouter from "./routes/jobBackfillRouter.js";
 import userRegistrationRouter from "./routes/userRegistrationRouter.js";
 import serviceRouter from "./routes/serviceRouter.js";
+import dashboardRouter from "./routes/dashboardRouter.js";
 import customerContactRouter from "./routes/customerContactRouter.js";
 import termsAndConditionsRouter from "./routes/termsAndConditionsRouter.js";
 import quoteTermsAcceptanceRouter from "./routes/quoteTermsAcceptanceRouter.js";
@@ -54,6 +56,7 @@ app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 // Routes
 app.use("/api", emailRouter);
 app.use("/api", customerContactRouter);
+app.use("/api/dashboard", dashboardRouter);
 app.use("/api/services", serviceRouter);
 app.use("/api/search", searchRouter);
 app.use("/api/pre-users", userRegistrationRouter);
@@ -73,6 +76,7 @@ app.use('/api/verify-recaptcha-v2', verifyRecaptchaV2Router);
 app.use("/api/terms-and-conditions", termsAndConditionsRouter);
 app.use("/api/quote-terms-acceptances", quoteTermsAcceptanceRouter);
 app.use("/api/inquiries", inquiryRouter);
+app.use("/api/jobs/public", jobAccessTokenRouter);
 
 // Global error handler (last)
 app.use(errorHandler);

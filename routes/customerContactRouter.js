@@ -17,13 +17,13 @@ import { requireRole } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // list all contacts for a customer
-router.get("/customers/uuid/:customer_uuid/contacts", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getCustomerContacts);
+router.get("/customers/uuid/:uuid/contacts", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getCustomerContacts);
 
 // create new contact for a customer
-router.post("/customers/uuid/:customer_uuid/contacts", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]),createCustomerContact);
+router.post("/customers/uuid/:uuid/contacts", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), createCustomerContact);
 
-// get one contact by contact uuid
-router.get("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireRole(["owner", "admin","employee", "customer"]) , requireAuth, getCustomerContactByUUID);
+// get contact by customer uuid
+router.get("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]) , getCustomerContactByUUID);
 
 // update one contact by contact uuid
 router.patch("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), updateCustomerContact);

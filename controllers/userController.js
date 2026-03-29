@@ -343,13 +343,17 @@ export const login = async (req, res) => {
     } catch (logErr) {
       console.error("UserLogin.create failed:", logErr);
     }
+    const isStaffRole = ["admin", "owner", "employee"].includes(localUser.role);
+    
+    const accessTokenMaxAge = isStaffRole
+      ? 1000 * 60 * 60 * 24 // 1 day
+      : 1000 * 60 * 60 * 2 ; // 2 hours
 
     res.cookie("accessToken", data.session.access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      // maxAge: 1000 * 60 * 60 * 24,
-      maxAge: 1000 * 60 * 15, //15 minutes
+      maxAge: accessTokenMaxAge,
       path: "/",
     });
 
@@ -365,7 +369,7 @@ export const login = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 1000 * 60 * 15, // match access token
+      maxAge: accessTokenMaxAge,
       path: "/",
     });
 
@@ -524,6 +528,37 @@ export const getCurrentUser = async (req, res) => {
     return res.status(500).json({ error: err.message || "Internal server error" });
   }
 };
+
+// export const getCurrentCustomer = async (req, res) => {
+//   try {
+//     if (!req.user?.uuid) {
+//       return res.status(401).json({ error: "Unauthorized" });
+//     }
+
+//     if (req.user.role !== "customer") {
+//       return res.status(403).json({ error: "Only customers can access this route" });
+//     }
+
+//     if (!req.user.customer_uuid) {
+//       return res.status(404).json({ error: "No customer profile linked to this user" });
+//     }
+
+//     const customer = await Customer.findByUUID(req.user.customer_uuid);
+
+//     if (!customer) {
+//       return res.status(404).json({ error: "Customer not found" });
+//     }
+
+//     return res.status(200).json({
+//       customer,
+//     });
+//   } catch (err) {
+//     console.error("getCurrentCustomer error:", err);
+//     return res.status(500).json({
+//       error: err.message || "Internal server error",
+//     });
+//   }
+// };
 
 export const verifyEmail = async (req, res) => {
   const token = req.body?.token || req.query?.token;

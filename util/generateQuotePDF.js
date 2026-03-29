@@ -6,13 +6,13 @@ import { capitalize } from "../util/util.js";
 export const generateQuotePDF = async (quote, customer = null) => {
   const headerImagePath = path.join(
     process.cwd(),
-    "assets/pdf/happy-house-header.png"
+    "assets/happy-house-header.png"
   );
 
   let headerBuffer = null;
 
   try {
-    headerBuffer = fs.readFileSync(headerImagePath);
+    headerBuffer = await fs.promises.readFile(headerImagePath);
   } catch (err) {
     console.error("Header asset load failed:", err.message);
   }
@@ -119,7 +119,7 @@ export const generateQuotePDF = async (quote, customer = null) => {
         align: "right",
       });
 
-      doc.text(`Email: ${process.env.CONTACT_EMAIL || "-"}`, {
+      doc.text(`Email: ${process.env.QUOTES_EMAIL || "-"}`, {
         width: rightColWidth,
         align: "right",
       });

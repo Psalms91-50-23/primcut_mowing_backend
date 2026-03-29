@@ -21,7 +21,10 @@ import {
     updateJobSchedule,
     getJobRecurrences,
     extendJobRecurrences,
-    getDashboardJobs
+    getDashboardJobs,
+    getPublicJobView,
+    getJobsByCustomerUUID 
+    
 } from '../controllers/jobController.js';
 
 // GET all jobs
@@ -30,9 +33,11 @@ router.get('/all', getAllJobs);
 
 router.post("/backfill-addresses", backfillJobAddresses);
 
-router.get("/dashboard", getDashboardJobs);
+// router.get("/dashboard", getDashboardJobs);
 // GET job by UUID
 router.get('/uuid/:uuid', getJobByUUID);
+
+router.get('/:uuid/public-view', getPublicJobView );
 
 // CREATE job from quote UUID
 router.post('/from-quote/:quote_uuid', createJobFromQuote);
@@ -42,6 +47,8 @@ router.get('/by-quote/:quote_uuid', getJobByQuoteUUID);
 
 // HARD DELETE job by UUID
 router.delete('/uuid/:uuid', hardDeleteJobByUUID);
+
+router.get('/customer/:uuid', getJobsByCustomerUUID);
 
 // UPDATE job by UUID
 router.patch('/uuid/:uuid', updateByUUID);
@@ -53,6 +60,7 @@ router.get("/:uuid/details", getJobDetailedByUUID);
 router.patch("/:uuid/schedule", updateJobSchedule);
 
 router.get("/:uuid/recurrences", getJobRecurrences);
+
 router.post("/:uuid/recurrences/extend", extendJobRecurrences);
 
 

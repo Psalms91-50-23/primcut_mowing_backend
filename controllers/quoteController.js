@@ -1,8 +1,10 @@
 import Quote from "../models/Quote.js";
 import Customer from "../models/Customer.js";
+import Service from "../models/Service.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import Job from "../models/Job.js";
 import User from "../models/User.js";
+import TermsAndConditions from "../models/TermsAndConditions.js";
 import crypto from "crypto";
 import {
   generatePrefixedId,
@@ -15,16 +17,23 @@ import {
 } from "../util/util.js";
 
 import { generateQuotePDF } from "../util/generateQuotePDF.js";
+import { createQuoteTermsAcceptanceRecord } from "../util/createQuoteTermsAcceptanceRecord.js";
+import { generateTermsPDF } from "../util/generateTermsPDF.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
+import { downloadTermsPDFBuffer, uploadTermsPDFBuffer, downloadStorageFileBuffer } from "../util/termsAndConditionsHelper.js";
 import {
   sendQuoteToBusiness,
   sendQuoteAccepted,
   sendQuoteRejected,
   sendQuoteToClient,
+  sendQuoteAcceptedToBusiness
 } from "../lib/email/index.js";
 import supabase from "../config/db.js";
+import { uploadImageToBucket, removeUploadedFiles, parseJSONField } from "../util/uploadHelpers.js";
 
-const MIN_EXPIRY_DAYS = 2;
+const QUOTE_IMAGES_BUCKET = "quote-images";
+const URGENT_FEE_AMOUNT = 200;
+const MIN_EXPIRY_DAYS = 3;
 const UUID_REGEX = /^[a-zA-Z0-9]{9}$/;
 
 function assertUUID(uuid) {
@@ -33,6 +42,26 @@ function assertUUID(uuid) {
   if (!UUID_REGEX.test(u)) throw new Error("UUID must be exactly 9 letters or numbers.");
   return u;
 }
+
+const sanitizeFileName = (name = "image") => {
+  return String(name)
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+};
+
+const getExtensionFromMime = (mimetype = "") => {
+  const map = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+  };
+
+  return map[mimetype] || "";
+};
 
 // GET /api/quotes/summary/:uuid
 export const getQuoteSummaryByUUID = async (req, res) => {
@@ -90,6 +119,8 @@ export const getLimitedQuoteByUUID = async (req, res) => {
       gst_amount: quote.gst_amount,
       total_amount: quote.total_amount,
       limited: true,
+      has_urgent_fee: quote.has_urgent_fee ? true : false,
+      urgent_fee_amount: quote.urgent_fee_amount || 0,
     };
 
     return res.status(200).json({ quote: limitedQuote });
@@ -161,6 +192,31 @@ export const getQuoteById = async (req, res) => {
   }
 };
 
+export const getQuotesByCustomerUUID = async (req, res) => {
+  const { customerUuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  if (!customerUuid) {
+    return res.status(400).json({ error: "Customer UUID is required" });
+  }
+
+  try {
+    const quotes = await Quote.findByCustomerUUID(customerUuid);
+
+    return res.status(200).json({
+      quotes,
+      count: quotes.length,
+      customer_uuid: customerUuid,
+      actor_user_uuid: actorUserUuid,
+    });
+  } catch (error) {
+    console.error("getQuotesByCustomerUUID error:", error);
+    return res.status(500).json({
+      error: "Failed to fetch quotes for customer",
+    });
+  }
+};
+
 // Get quote by UUID
 export const getQuoteByUUID = async (req, res) => {
   const { uuid } = req.params;
@@ -179,9 +235,9 @@ export const getQuoteByUUID = async (req, res) => {
   }
 };
 
-// // Create quote
+
 // export const createQuote = async (req, res) => {
-//   let newQuote = null;createQuote
+//   let newQuote = null;
 //   let quoteAccessToken = null;
 
 //   try {
@@ -197,12 +253,16 @@ export const getQuoteByUUID = async (req, res) => {
 //       email,
 //       message,
 //       address,
+//       recurrence_frequency,
+//       urgent,
 //     } = req.body;
 
+//     const isUrgentRequested = urgent === true || urgent === "true";
 //     const actorUserUuid = req.user?.uuid || null;
 
 //     let actorUser = null;
 //     let actorCustomer = null;
+//     let existingCustomer = null;
 
 //     let source = "public_form";
 
@@ -241,12 +301,30 @@ export const getQuoteByUUID = async (req, res) => {
 //       null
 //     );
 
-//     const resolvedMobile = mobile?.trim() || actorCustomer?.mobile_phone || null;
-//     const resolvedLandline = landline?.trim() || actorCustomer?.landline_phone || null;
-//     const resolvedAddress = (address?.trim() || actorCustomer?.address || "").trim();
+//     const resolvedMobile =
+//       mobile?.trim() || actorCustomer?.mobile_phone || null;
 
-//     const resolvedCustomerUuid =
-//       customer_uuid || actorCustomer?.uuid || actorUser?.customer_uuid || null;
+//     const resolvedLandline =
+//       landline?.trim() || actorCustomer?.landline_phone || null;
+
+//     const resolvedAddress = (
+//       address?.trim() ||
+//       actorCustomer?.address ||
+//       ""
+//     ).trim();
+
+//     const allowedRecurrenceFrequencies = [
+//       "one_off",
+//       "weekly",
+//       "fortnightly",
+//       "monthly",
+//     ];
+
+//     const normalizedRecurrenceFrequency = allowedRecurrenceFrequencies.includes(
+//       recurrence_frequency
+//     )
+//       ? recurrence_frequency
+//       : "one_off";
 
 //     if (!resolvedFirstName || !resolvedLastName) {
 //       return res.status(400).json({
@@ -273,8 +351,8 @@ export const getQuoteByUUID = async (req, res) => {
 //     }
 
 //     if (resolvedEmail) {
-//       const existingCustomer = await Customer.findByEmail(resolvedEmail);
-//       console.log({existingCustomer}, " in create quote controller");
+//       existingCustomer = await Customer.findByEmail(resolvedEmail);
+
 //       if (existingCustomer?.is_blacklisted) {
 //         return res.status(403).json({
 //           error: "We are unable to process this request at this time.",
@@ -282,6 +360,13 @@ export const getQuoteByUUID = async (req, res) => {
 //         });
 //       }
 //     }
+
+//     const resolvedCustomerUuid =
+//       customer_uuid ||
+//       actorCustomer?.uuid ||
+//       actorUser?.customer_uuid ||
+//       existingCustomer?.uuid ||
+//       null;
 
 //     const cleanedServices = services
 //       .map((service) => {
@@ -293,14 +378,10 @@ export const getQuoteByUUID = async (req, res) => {
 //             : null;
 
 //         const code =
-//           typeof service.code === "string"
-//             ? service.code.trim()
-//             : null;
+//           typeof service.code === "string" ? service.code.trim() : null;
 
 //         const label =
-//           typeof service.label === "string"
-//             ? service.label.trim()
-//             : null;
+//           typeof service.label === "string" ? service.label.trim() : null;
 
 //         const description =
 //           typeof service.description === "string" && service.description.trim()
@@ -313,9 +394,7 @@ export const getQuoteByUUID = async (req, res) => {
 //             : null;
 
 //         const unit =
-//           typeof service.unit === "string"
-//             ? service.unit.trim()
-//             : null;
+//           typeof service.unit === "string" ? service.unit.trim() : null;
 
 //         const unit_price =
 //           service.unit_price !== undefined && service.unit_price !== null
@@ -348,6 +427,52 @@ export const getQuoteByUUID = async (req, res) => {
 //       });
 //     }
 
+//     if (isUrgentRequested && cleanedServices.length !== 1) {
+//       return res.status(400).json({
+//         error:
+//           "Only 1 urgent request can be done per job. Please select one urgent-eligible service only.",
+//       });
+//     }
+
+//     if (isUrgentRequested) {
+//       const selectedService = cleanedServices[0];
+
+//       let dbService = null;
+
+//       try {
+//         if (selectedService.service_uuid) {
+//           dbService = await Service.getByUUID(selectedService.service_uuid);
+//         }
+
+//         if (!dbService && selectedService.code) {
+//           dbService = await Service.getByCode(selectedService.code);
+//         }
+//       } catch (serviceError) {
+//         console.error("Service validation failed:", serviceError);
+//         return res.status(400).json({
+//           error: "Selected service could not be validated.",
+//         });
+//       }
+
+//       if (!dbService) {
+//         return res.status(400).json({
+//           error: "Selected service could not be validated.",
+//         });
+//       }
+
+//       if (!dbService.is_active || dbService.is_deleted) {
+//         return res.status(400).json({
+//           error: "Selected service is not currently available.",
+//         });
+//       }
+
+//       if (!dbService.urgent_allowed) {
+//         return res.status(400).json({
+//           error: "Urgent booking is not available for the selected service.",
+//         });
+//       }
+//     }
+
 //     const cleanedImages = (images || [])
 //       .map((img) => {
 //         if (typeof img === "string") {
@@ -365,8 +490,13 @@ export const getQuoteByUUID = async (req, res) => {
 //       })
 //       .filter(Boolean);
 
-//     const normalizedMobile = resolvedMobile ? normalizeNZPhone(resolvedMobile) : null;
-//     const normalizedLandline = resolvedLandline ? normalizeNZPhone(resolvedLandline) : null;
+//     const normalizedMobile = resolvedMobile
+//       ? normalizeNZPhone(resolvedMobile)
+//       : null;
+
+//     const normalizedLandline = resolvedLandline
+//       ? normalizeNZPhone(resolvedLandline)
+//       : null;
 
 //     const allowedMethods = ["mobile", "landline", "email"];
 
@@ -412,12 +542,15 @@ export const getQuoteByUUID = async (req, res) => {
 //       gst_amount: 0,
 //       total_amount: 0,
 //       status: "draft",
+//       has_urgent_fee: isUrgentRequested,
+//       urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
 //       is_quote_sent_to_client: false,
 //       quote_sent_at: null,
 //       address: resolvedAddress,
 //       images: cleanedImages,
 //       responded_at: null,
 //       sent_by_user_uuid: actorUserUuid,
+//       recurrence_frequency: normalizedRecurrenceFrequency,
 //     };
 
 //     newQuote = await Quote.create(newQuoteData);
@@ -441,7 +574,10 @@ export const getQuoteByUUID = async (req, res) => {
 //         contact_last_name: { old: null, new: resolvedLastName },
 //         contact_mobile: { old: null, new: normalizedMobile },
 //         contact_landline: { old: null, new: normalizedLandline },
-//         preferred_contact_method: { old: null, new: normalizedPreferredContactMethod },
+//         preferred_contact_method: {
+//           old: null,
+//           new: normalizedPreferredContactMethod,
+//         },
 //         contact_email: { old: null, new: resolvedEmail },
 //         message: { old: null, new: message?.trim() || null },
 //         address: { old: null, new: resolvedAddress },
@@ -450,6 +586,15 @@ export const getQuoteByUUID = async (req, res) => {
 //         status: { old: null, new: "draft" },
 //         is_quote_sent_to_client: { old: null, new: false },
 //         sent_by_user_uuid: { old: null, new: actorUserUuid },
+//         recurrence_frequency: {
+//           old: null,
+//           new: normalizedRecurrenceFrequency,
+//         },
+//         has_urgent_fee: { old: null, new: isUrgentRequested },
+//         urgent_fee_amount: {
+//           old: null,
+//           new: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+//         },
 //       },
 //       source,
 //     });
@@ -470,6 +615,11 @@ export const getQuoteByUUID = async (req, res) => {
 //     });
 
 //     const employeeLink = `${process.env.CLIENT_URL}/employee/quotes/${uuid}`;
+//     const subjectHeader = `New Quote Request from ${formatFullName(
+//       resolvedFirstName,
+//       resolvedLastName,
+//       false
+//     )} Quote #${uuid}`;
 
 //     await sendQuoteToBusiness({
 //       quoteUuid: uuid,
@@ -483,6 +633,10 @@ export const getQuoteByUUID = async (req, res) => {
 //       images: cleanedImages,
 //       employeeLink,
 //       address: resolvedAddress,
+//       recurrenceFrequency: normalizedRecurrenceFrequency,
+//       subjectHeader,
+//       has_urgent_fee: isUrgentRequested,
+//       urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
 //     });
 
 //     return res.status(201).json({ data: newQuote });
@@ -508,15 +662,20 @@ export const getQuoteByUUID = async (req, res) => {
 //     return res.status(500).json({ error: "Server error" });
 //   }
 // };
+
+// Update by UUID
+
+
 export const createQuote = async (req, res) => {
   let newQuote = null;
   let quoteAccessToken = null;
+  let uploadedImages = [];
 
   try {
+    const files = Array.isArray(req.files) ? req.files : [];
+
     const {
       customer_uuid,
-      services,
-      images,
       first_name,
       last_name,
       mobile,
@@ -526,8 +685,20 @@ export const createQuote = async (req, res) => {
       message,
       address,
       recurrence_frequency,
+      urgent,
     } = req.body;
 
+    const services = Array.isArray(req.body.services)
+      ? req.body.services
+      : parseJSONField(req.body.services, []);
+
+    const imageLabels = Array.isArray(req.body.image_labels)
+      ? req.body.image_labels
+      : req.body.image_labels
+      ? [req.body.image_labels]
+      : [];
+
+    const isUrgentRequested = urgent === true || urgent === "true";
     const actorUserUuid = req.user?.uuid || null;
 
     let actorUser = null;
@@ -622,7 +793,6 @@ export const createQuote = async (req, res) => {
 
     if (resolvedEmail) {
       existingCustomer = await Customer.findByEmail(resolvedEmail);
-      console.log({ existingCustomer }, " in create quote controller");
 
       if (existingCustomer?.is_blacklisted) {
         return res.status(403).json({
@@ -698,22 +868,51 @@ export const createQuote = async (req, res) => {
       });
     }
 
-    const cleanedImages = (images || [])
-      .map((img) => {
-        if (typeof img === "string") {
-          return { url: img.trim() };
+    if (isUrgentRequested && cleanedServices.length !== 1) {
+      return res.status(400).json({
+        error:
+          "Only 1 urgent request can be done per job. Please select one urgent-eligible service only.",
+      });
+    }
+
+    if (isUrgentRequested) {
+      const selectedService = cleanedServices[0];
+
+      let dbService = null;
+
+      try {
+        if (selectedService.service_uuid) {
+          dbService = await Service.getByUUID(selectedService.service_uuid);
         }
 
-        if (img && typeof img.url === "string") {
-          return {
-            url: img.url.trim(),
-            ...(img.label ? { label: img.label.trim() } : {}),
-          };
+        if (!dbService && selectedService.code) {
+          dbService = await Service.getByCode(selectedService.code);
         }
+      } catch (serviceError) {
+        console.error("Service validation failed:", serviceError);
+        return res.status(400).json({
+          error: "Selected service could not be validated.",
+        });
+      }
 
-        return null;
-      })
-      .filter(Boolean);
+      if (!dbService) {
+        return res.status(400).json({
+          error: "Selected service could not be validated.",
+        });
+      }
+
+      if (!dbService.is_active || dbService.is_deleted) {
+        return res.status(400).json({
+          error: "Selected service is not currently available.",
+        });
+      }
+
+      if (!dbService.urgent_allowed) {
+        return res.status(400).json({
+          error: "Urgent booking is not available for the selected service.",
+        });
+      }
+    }
 
     const normalizedMobile = resolvedMobile
       ? normalizeNZPhone(resolvedMobile)
@@ -743,6 +942,36 @@ export const createQuote = async (req, res) => {
       exists = await Quote.findByUUID(uuid);
     } while (exists);
 
+    if (files.length > 10) {
+      return res.status(400).json({
+        error: "You can upload a maximum of 10 images.",
+      });
+    }
+
+    uploadedImages = [];
+
+    for (let i = 0; i < files.length; i += 1) {
+      const uploaded = await uploadImageToBucket({
+        bucket: QUOTE_IMAGES_BUCKET,
+        folder: `quotes/${uuid}`,
+        file: files[i],
+        index: i,
+      });
+
+      uploadedImages.push({
+        label:
+          typeof imageLabels[i] === "string" && imageLabels[i].trim()
+            ? imageLabels[i].trim()
+            : `Image ${i + 1}`,
+        url: uploaded.url,
+        path: uploaded.path,
+        file_name: uploaded.file_name,
+        mime_type: uploaded.mime_type,
+        size: uploaded.size,
+        uploaded_at: uploaded.uploaded_at,
+      });
+    }
+
     const actionToken = crypto.randomBytes(32).toString("hex");
     const actionTokenHash = crypto
       .createHash("sha256")
@@ -767,10 +996,12 @@ export const createQuote = async (req, res) => {
       gst_amount: 0,
       total_amount: 0,
       status: "draft",
+      has_urgent_fee: isUrgentRequested,
+      urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
       is_quote_sent_to_client: false,
       quote_sent_at: null,
       address: resolvedAddress,
-      images: cleanedImages,
+      images: uploadedImages,
       responded_at: null,
       sent_by_user_uuid: actorUserUuid,
       recurrence_frequency: normalizedRecurrenceFrequency,
@@ -779,7 +1010,7 @@ export const createQuote = async (req, res) => {
     newQuote = await Quote.create(newQuoteData);
 
     if (!newQuote) {
-      return res.status(500).json({ error: "Failed to create quote" });
+      throw new Error("Failed to create quote");
     }
 
     await createChangeLogSafe({
@@ -805,13 +1036,18 @@ export const createQuote = async (req, res) => {
         message: { old: null, new: message?.trim() || null },
         address: { old: null, new: resolvedAddress },
         services: { old: null, new: cleanedServices },
-        images: { old: null, new: cleanedImages },
+        images: { old: null, new: uploadedImages },
         status: { old: null, new: "draft" },
         is_quote_sent_to_client: { old: null, new: false },
         sent_by_user_uuid: { old: null, new: actorUserUuid },
         recurrence_frequency: {
           old: null,
           new: normalizedRecurrenceFrequency,
+        },
+        has_urgent_fee: { old: null, new: isUrgentRequested },
+        urgent_fee_amount: {
+          old: null,
+          new: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
         },
       },
       source,
@@ -833,6 +1069,11 @@ export const createQuote = async (req, res) => {
     });
 
     const employeeLink = `${process.env.CLIENT_URL}/employee/quotes/${uuid}`;
+    const subjectHeader = `New Quote Request from ${formatFullName(
+      resolvedFirstName,
+      resolvedLastName,
+      false
+    )} Quote #${uuid}`;
 
     await sendQuoteToBusiness({
       quoteUuid: uuid,
@@ -843,15 +1084,18 @@ export const createQuote = async (req, res) => {
       email: resolvedEmail,
       message: message?.trim() || null,
       services: cleanedServices,
-      images: cleanedImages,
+      images: uploadedImages,
       employeeLink,
       address: resolvedAddress,
       recurrenceFrequency: normalizedRecurrenceFrequency,
+      subjectHeader,
+      has_urgent_fee: isUrgentRequested,
+      urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
     });
 
     return res.status(201).json({ data: newQuote });
   } catch (error) {
-    console.error(error);
+    console.error("createQuote error:", error);
 
     if (quoteAccessToken?.uuid) {
       try {
@@ -869,11 +1113,17 @@ export const createQuote = async (req, res) => {
       }
     }
 
+    if (uploadedImages.length) {
+      await removeUploadedFiles({
+        bucket: QUOTE_IMAGES_BUCKET,
+        files: uploadedImages,
+      });
+    }
+
     return res.status(500).json({ error: "Server error" });
   }
 };
 
-// Update by UUID
 export const updateQuoteByUUID = async (req, res) => {
   const { uuid } = req.params;
   
@@ -1001,15 +1251,15 @@ export const updateQuoteByUUID = async (req, res) => {
   }
 };
 
-
 export const updateQuoteByUUIDEmployee = async (req, res) => {
   const { uuid } = req.params;
 
   if (!uuid) {
     return res.status(400).json({ message: "Quote uuid is required" });
   }
-  const actorUserUuid = req.user?.uuid || null;
 
+  const actorUserUuid = req.user?.uuid || null;
+  console.log({ actorUserUuid });
 
   let existingQuote;
   let quoteSnapshot = null;
@@ -1051,6 +1301,8 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       expiry_end,
       sent_by_user_uuid,
       employer_message,
+      has_urgent_fee,
+      urgent_fee_amount,
     } = req.body;
 
     const allowedContact = ["mobile", "landline", "email"];
@@ -1084,49 +1336,110 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       }
     }
 
-    const calcSubtotal = services.reduce(
-      (sum, s) => sum + s.unit_price * s.quantity,
-      0
+    const servicesSubtotal = parseFloat(
+      services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0).toFixed(2)
     );
 
+    const safeHasUrgentFee = Boolean(has_urgent_fee);
+    const safeUrgentFee = safeHasUrgentFee
+      ? parseFloat(Number(urgent_fee_amount ?? 0).toFixed(2))
+      : 0;
+
+    if (safeUrgentFee < 0) {
+      return res.status(400).json({
+        message: "Urgent fee must be zero or greater",
+      });
+    }
+
+    const calcSubtotal = parseFloat((servicesSubtotal + safeUrgentFee).toFixed(2));
     const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
     const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
 
-    if (calcSubtotal !== subtotal_amount) {
-      return res.status(400).json({ message: "Subtotal mismatch" });
+    if (parseFloat(Number(subtotal_amount).toFixed(2)) !== calcSubtotal) {
+      return res.status(400).json({
+        message: "Subtotal mismatch",
+        expected: calcSubtotal,
+        received: subtotal_amount,
+      });
     }
 
-    if (calcGST !== gst_amount) {
-      return res.status(400).json({ message: "GST mismatch" });
+    if (parseFloat(Number(gst_amount).toFixed(2)) !== calcGST) {
+      return res.status(400).json({
+        message: "GST mismatch",
+        expected: calcGST,
+        received: gst_amount,
+      });
     }
 
-    if (calcTotal !== total_amount) {
-      return res.status(400).json({ message: "Total mismatch" });
+    if (parseFloat(Number(total_amount).toFixed(2)) !== calcTotal) {
+      return res.status(400).json({
+        message: "Total mismatch",
+        expected: calcTotal,
+        received: total_amount,
+      });
     }
+
+    const sentAt = new Date();
+
+    const exactMinExpiryDate = new Date(
+      sentAt.getTime() + MIN_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+    );
+
+    const allowCustomFromDate = new Date(
+      sentAt.getTime() + (MIN_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000
+    );
 
     let expiry_end_date;
 
     if (expiry_end) {
-      expiry_end_date = new Date(expiry_end);
+      if (
+        typeof expiry_end === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(expiry_end)
+      ) {
+        const [year, month, day] = expiry_end.split("-").map(Number);
+
+        expiry_end_date = new Date(sentAt);
+        expiry_end_date.setFullYear(year, month - 1, day);
+      } else {
+        expiry_end_date = new Date(expiry_end);
+      }
     } else {
-      expiry_end_date = new Date();
+      expiry_end_date = new Date(exactMinExpiryDate);
     }
 
-    const minExpiryDate = new Date();
-    minExpiryDate.setUTCDate(minExpiryDate.getUTCDate() + MIN_EXPIRY_DAYS);
-    minExpiryDate.setUTCHours(23, 59, 59, 999);
-
-    if (expiry_end_date < minExpiryDate) {
-      expiry_end_date = minExpiryDate;
+    if (Number.isNaN(expiry_end_date.getTime())) {
+      return res.status(400).json({
+        message: "Invalid expiry date",
+      });
     }
 
-    const quoteSentAt = new Date().toISOString();
+    if (expiry_end_date < allowCustomFromDate) {
+      expiry_end_date = new Date(exactMinExpiryDate);
+    }
+
+    const quoteSentAt = sentAt.toISOString();
+
+    const activeTerms = await TermsAndConditions.findActive();
+
+    if (!activeTerms) {
+      return res.status(400).json({
+        message: "No active terms and conditions found",
+      });
+    }
+
+    if (!activeTerms.pdf_storage_path) {
+      return res.status(400).json({
+        message: "Active terms and conditions PDF is missing",
+      });
+    }
 
     const updatePayload = {
       services,
-      subtotal_amount,
-      gst_amount,
-      total_amount,
+      subtotal_amount: calcSubtotal,
+      gst_amount: calcGST,
+      total_amount: calcTotal,
+      has_urgent_fee: safeHasUrgentFee,
+      urgent_fee_amount: safeUrgentFee,
       expiry_end: expiry_end_date.toISOString(),
       status: "sent",
       is_quote_sent_to_client: true,
@@ -1139,23 +1452,16 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       contact_last_name,
       employer_message: employer_message ?? "",
       quote_version_reason: "employee_sent",
+      terms_uuid: activeTerms.uuid,
+      terms_version: activeTerms.version,
+      terms_pdf_url: activeTerms.pdf_url ?? null,
     };
 
-    // const logoUrl = `${process.env.FRONTEND_HAPPY_LAWNS}/assets/happy-house-header.png`;
-    const logoUrl = `${process.env.FRONTEND_URL_HAPPY_LAWNS}/images/happy-house-1.png`;
     let logoBuffer = null;
-    // try {
-    //   const logoPath = path.join(process.cwd(), "assets", "happy-house-header.png");
-    //   logoBuffer = fs.readFileSync(logoPath);
-    // } catch (err) {
-    //   console.error("Logo load failed:", err.message);
-    // }
-
 
     try {
-      const response = await fetch(logoUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      logoBuffer = Buffer.from(arrayBuffer);
+      const logoPath = path.join(process.cwd(), "assets", "happy-house-header.png");
+      logoBuffer = fs.readFileSync(logoPath);
     } catch (err) {
       console.error("Logo load failed:", err.message);
     }
@@ -1170,9 +1476,26 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     );
 
     const result = await Quote.dispatchQuote(uuid, { ...updatePayload }, pdfBuffer);
-
     const finalQuote = result.updated;
     filePath = result.filePath;
+
+    const recipientEmail = finalQuote.contact_email?.trim().toLowerCase();
+
+    if (!recipientEmail) {
+      return res.status(400).json({
+        message: "Contact email is required",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(recipientEmail)) {
+      return res.status(400).json({
+        message: "Contact email is invalid",
+      });
+    }
+
+    const termsPdfBuffer = await downloadTermsPDFBuffer(activeTerms.pdf_storage_path);
 
     await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
 
@@ -1197,28 +1520,42 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
     const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
 
     await sendQuoteToClient({
-      to: finalQuote.contact_email,
-      subject: "Your Quote is Ready",
+      to: recipientEmail,
+      subject: `Your Quote #${finalQuote.uuid} ${formatFullName(
+        finalQuote.contact_first_name,
+        finalQuote.contact_last_name,
+        false
+      )} is Ready`,
       data: {
         quoteUUID: finalQuote.uuid,
         name: formatFullName(
           finalQuote.contact_first_name,
-          finalQuote.contact_last_name
+          finalQuote.contact_last_name,
+          false
         ),
         mobile: finalQuote.contact_mobile ?? "",
         landline: finalQuote.contact_landline ?? "",
         message: finalQuote.message ?? "",
-        email: finalQuote.contact_email,
+        email: recipientEmail,
         subtotal: finalQuote.subtotal_amount,
         gst: finalQuote.gst_amount,
         total: finalQuote.total_amount,
         services: finalQuote.services,
         images: finalQuote.images,
         quoteLink,
+        quotePdfUrl: finalQuote.quote_pdf_url ?? "",
         expiry: formatExpiry(finalQuote.expiry_end),
-        employer_message: employer_message ?? "",
+        employer_message: finalQuote.employer_message ?? "",
+        has_urgent_fee: finalQuote.has_urgent_fee,
+        urgent_fee_amount: finalQuote.urgent_fee_amount,
+        termsVersion: activeTerms.version ?? "",
+        termsTitle: activeTerms.title ?? "",
+        termsUrl: activeTerms.pdf_url ?? "",
+        termsSummary: activeTerms.short_summary ?? "",
       },
       pdfBuffer,
+      termsPdfBuffer,
+      termsFileName: `terms-and-conditions-${activeTerms.version}.pdf`,
     });
 
     const fieldsToTrack = [
@@ -1239,8 +1576,14 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       "employer_message",
       "quote_version_reason",
       "quote_pdf_url",
+      "quote_pdf_storage_path",
       "pdf_version",
       "quote_pdf_version",
+      "terms_uuid",
+      "terms_version",
+      "terms_pdf_url",
+      "has_urgent_fee",
+      "urgent_fee_amount",
     ];
 
     const changed_fields = {};
@@ -1262,7 +1605,8 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       record_uuid: finalQuote.uuid,
       user_uuid: actorUserUuid,
       action: "update",
-      summary: "Employee updated draft quote, generated PDF, and sent quote to client",
+      summary:
+        "Employee updated draft quote, generated PDF, attached T&C PDF, and sent quote to client",
       changed_fields,
       source: "dashboard",
     });
@@ -1539,338 +1883,6 @@ export const hardDeleteQuote = async (req, res) => {
   }
 };
 
-// export const acceptQuote = async (req, res) => {
-//   const { uuid } = req.params;
-//   const { token, customer_uuid } = req.body;
-
-//   const actorUserUuid = req.user?.uuid || null;
-
-//   if (!uuid) {
-//     return res.status(400).json({ error: "Quote UUID is required" });
-//   }
-
-//   if (!token) {
-//     return res.status(401).json({ error: "Token required" });
-//   }
-
-//   let customerCreated = false;
-//   let jobCreated = false;
-//   let customer = null;
-//   let job = null;
-
-//   try {
-//     const quote = await Quote.findByUUID(uuid);
-//     if (!quote) {
-//       return res.status(404).json({ error: "Quote not found" });
-//     }
-
-//     const quoteSnapshot = JSON.parse(JSON.stringify(quote));
-
-//     if (quote.responded_at) {
-//       return res.status(400).json({
-//         error: "Quote already responded to",
-//         responded_at: quote.responded_at,
-//       });
-//     }
-
-//     const tokenHash = hashToken(token);
-//     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
-
-//     if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
-//       return res.status(401).json({ error: "Invalid token" });
-//     }
-
-//     if (new Date(tokenRecord.expires_at) < new Date()) {
-//       return res.status(401).json({ error: "Token expired" });
-//     }
-
-//     if (!quote.contact_email?.trim()) {
-//       return res.status(400).json({ error: "Quote email is required" });
-//     }
-
-//     const email = quote.contact_email?.trim().toLowerCase();
-//     const firstName = quote.contact_first_name?.trim() || "";
-//     const lastName = quote.contact_last_name?.trim() || "";
-
-//     if (customer_uuid) {
-//       if (!actorUserUuid) {
-//         return res.status(401).json({
-//           error: "You must be logged in to attach a customer account",
-//         });
-//       }
-
-//       const selectedCustomer = await Customer.findByUUID(customer_uuid);
-
-//       if (!selectedCustomer) {
-//         return res.status(404).json({
-//           error: "Customer not found",
-//         });
-//       }
-
-//       if (selectedCustomer.user_uuid !== actorUserUuid) {
-//         return res.status(403).json({
-//           error: "You are not allowed to use this customer account",
-//         });
-//       }
-
-//       customer = selectedCustomer;
-//     } else {
-//       customer = await Customer.findByEmailAndName(email, firstName, lastName);
-
-//       if (!customer) {
-//         let customerUUID;
-//         while (true) {
-//           customerUUID = generatePrefixedId("C", 8);
-//           const exists = await Customer.findByUUID(customerUUID);
-//           if (!exists) break;
-//         }
-
-//         customer = await Customer.create({
-//           uuid: customerUUID,
-//           user_uuid: actorUserUuid || null,
-//           first_name: quote.contact_first_name ?? null,
-//           last_name: quote.contact_last_name ?? null,
-//           email,
-//           mobile_phone: quote.contact_mobile ?? null,
-//           landline_phone: quote.contact_landline ?? null,
-//           address: quote.address ?? null,
-//           created_via: "quote_accept",
-//         });
-
-//         customerCreated = true;
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "create",
-//           summary: "Customer record created from accepted quote",
-//           changed_fields: {
-//             uuid: { old: null, new: customer.uuid },
-//             user_uuid: { old: null, new: customer.user_uuid ?? null },
-//             first_name: { old: null, new: customer.first_name ?? null },
-//             last_name: { old: null, new: customer.last_name ?? null },
-//             email: { old: null, new: customer.email ?? null },
-//             mobile_phone: { old: null, new: customer.mobile_phone ?? null },
-//             landline_phone: { old: null, new: customer.landline_phone ?? null },
-//             address: { old: null, new: customer.address ?? null },
-//             created_via: { old: null, new: customer.created_via ?? null },
-//           },
-//           source: "customer_portal",
-//         });
-//       }
-//     }
-
-//     if (customer?.uuid) {
-//       const customerPhoneUpdates = {};
-//       const customerPhoneChangedFields = {};
-
-//       const currentMobile =
-//         customer.mobile_phone?.trim?.() || customer.mobile?.trim?.() || "";
-//       const currentLandline =
-//         customer.landline_phone?.trim?.() || customer.landline?.trim?.() || "";
-//       const quoteMobile = quote.contact_mobile?.trim?.() || "";
-//       const quoteLandline = quote.contact_landline?.trim?.() || "";
-
-//       if (!currentMobile && quoteMobile) {
-//         customerPhoneUpdates.mobile_phone = quoteMobile;
-//         customerPhoneChangedFields.mobile_phone = {
-//           old: customer.mobile_phone ?? customer.mobile ?? null,
-//           new: quoteMobile,
-//         };
-//       }
-
-//       if (!currentLandline && quoteLandline) {
-//         customerPhoneUpdates.landline_phone = quoteLandline;
-//         customerPhoneChangedFields.landline_phone = {
-//           old: customer.landline_phone ?? customer.landline ?? null,
-//           new: quoteLandline,
-//         };
-//       }
-
-//       if (Object.keys(customerPhoneUpdates).length > 0) {
-//         const updatedCustomer = await Customer.updateByUUID(
-//           customer.uuid,
-//           customerPhoneUpdates
-//         );
-
-//         customer = updatedCustomer || {
-//           ...customer,
-//           ...customerPhoneUpdates,
-//         };
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "update",
-//           summary: "Customer phone details filled from accepted quote",
-//           changed_fields: customerPhoneChangedFields,
-//           source: "customer_portal",
-//         });
-//       }
-//     }
-
-//     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
-//     if (existingJob) {
-//       return res.status(400).json({
-//         error: "A job already exists for this quote",
-//         job_uuid: existingJob.uuid,
-//       });
-//     }
-
-//     let jobUUID;
-//     while (true) {
-//       jobUUID = generatePrefixedId("J", 8);
-//       const exists = await Job.findByUUID(jobUUID);
-//       if (!exists) break;
-//     }
-
-//     job = await Job.createFromQuote({
-//       quote,
-//       uuid: jobUUID,
-//       customer_uuid: customer.uuid,
-//       scheduled_at: null,
-//       is_recurring: false,
-//       recurrence_interval: null,
-//       recurrence_frequency: null,
-//       recurrence_end_date: null,
-//     });
-
-//     jobCreated = true;
-
-//     await createChangeLogSafe({
-//       table_name: "jobs",
-//       record_uuid: job.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "create",
-//       summary: "Job created from accepted quote",
-//       changed_fields: {
-//         uuid: { old: null, new: job.uuid },
-//         customer_uuid: { old: null, new: job.customer_uuid ?? customer.uuid },
-//         quote_uuid: { old: null, new: quote.uuid },
-//         scheduled_at: { old: null, new: job.scheduled_at ?? null },
-//         is_recurring: { old: null, new: job.is_recurring ?? false },
-//         recurrence_interval: { old: null, new: job.recurrence_interval ?? null },
-//         recurrence_frequency: { old: null, new: job.recurrence_frequency ?? null },
-//         recurrence_end_date: { old: null, new: job.recurrence_end_date ?? null },
-//       },
-//       source: "customer_portal",
-//     });
-
-//     const filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
-
-//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
-
-//     const pdfBuffer = await generateQuotePDF(acceptedQuote, customer);
-
-//     const { error: uploadError } = await supabase.storage
-//       .from("quotes-pdf")
-//       .upload(filePath, pdfBuffer, {
-//         contentType: "application/pdf",
-//         upsert: true,
-//       });
-
-//     if (uploadError) throw uploadError;
-
-//     const { data: publicData } = supabase.storage
-//       .from("quotes-pdf")
-//       .getPublicUrl(filePath);
-
-//     const pdfUrl = publicData.publicUrl;
-
-//     const updatedQuote = await Quote.updateByUUID(uuid, {
-//       quote_pdf_url: pdfUrl,
-//       quote_pdf_version: (acceptedQuote.quote_pdf_version ?? 0) + 1,
-//       quote_version_reason: "quote_accepted",
-//     });
-
-//     const acceptedFields = {};
-//     const acceptanceFieldsToTrack = ["status", "responded_at", "customer_uuid"];
-
-//     for (const field of acceptanceFieldsToTrack) {
-//       const beforeValue = quoteSnapshot?.[field] ?? null;
-//       const afterValue = acceptedQuote?.[field] ?? null;
-
-//       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
-//         acceptedFields[field] = {
-//           old: beforeValue,
-//           new: afterValue,
-//         };
-//       }
-//     }
-
-//     await createChangeLogSafe({
-//       table_name: "quotes",
-//       record_uuid: acceptedQuote.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "update",
-//       summary: "Customer accepted quote",
-//       changed_fields: acceptedFields,
-//       source: "customer_portal",
-//     });
-
-//     const pdfFields = {};
-//     const pdfFieldsToTrack = [
-//       "quote_pdf_url",
-//       "quote_pdf_version",
-//       "quote_version_reason",
-//     ];
-
-//     for (const field of pdfFieldsToTrack) {
-//       const beforeValue = acceptedQuote?.[field] ?? null;
-//       const afterValue = updatedQuote?.[field] ?? null;
-
-//       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
-//         pdfFields[field] = {
-//           old: beforeValue,
-//           new: afterValue,
-//         };
-//       }
-//     }
-
-//     await createChangeLogSafe({
-//       table_name: "quotes",
-//       record_uuid: updatedQuote.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "update",
-//       summary: "Accepted quote PDF regenerated and version updated",
-//       changed_fields: pdfFields,
-//       source: "customer_portal",
-//     });
-
-//     await QuoteAccessToken.revokeAllForQuote(quote.uuid);
-
-//     try {
-//       await sendQuoteAccepted({
-//         to: quote.contact_email,
-//         quote: updatedQuote,
-//         pdfBuffer,
-//       });
-//     } catch (err) {
-//       console.error("Failed to send accepted email:", err);
-//     }
-
-//     return res.status(200).json({
-//       message: "Quote accepted successfully",
-//       quote: updatedQuote,
-//       customer,
-//       job,
-//     });
-//   } catch (error) {
-//     console.error("Accept quote error:", error);
-
-//     if (jobCreated && job?.uuid) {
-//       await Job.deleteByUUID(job.uuid).catch(console.error);
-//     }
-
-//     if (customerCreated && customer?.uuid) {
-//       await Customer.deleteByUUID(customer.uuid).catch(console.error);
-//     }
-
-//     return res.status(500).json({ error: error.message });
-//   }
-// };
 
 // export const acceptQuote = async (req, res) => {
 //   const { uuid } = req.params;
@@ -1893,367 +1905,7 @@ export const hardDeleteQuote = async (req, res) => {
 
 //   try {
 //     const quote = await Quote.findByUUID(uuid);
-//     if (!quote) {
-//       return res.status(404).json({ error: "Quote not found" });
-//     }
 
-//     const quoteSnapshot = JSON.parse(JSON.stringify(quote));
-
-//     if (quote.responded_at) {
-//       return res.status(400).json({
-//         error: "Quote already responded to",
-//         responded_at: quote.responded_at,
-//       });
-//     }
-
-//     const tokenHash = hashToken(token);
-//     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
-
-//     if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
-//       return res.status(401).json({ error: "Invalid token" });
-//     }
-
-//     if (new Date(tokenRecord.expires_at) < new Date()) {
-//       return res.status(401).json({ error: "Token expired" });
-//     }
-
-//     if (!quote.contact_email?.trim()) {
-//       return res.status(400).json({ error: "Quote email is required" });
-//     }
-
-//     const email = quote.contact_email?.trim().toLowerCase();
-//     const firstName = quote.contact_first_name?.trim() || "";
-//     const lastName = quote.contact_last_name?.trim() || "";
-
-//     if (customer_uuid) {
-//       if (!actorUserUuid) {
-//         return res.status(401).json({
-//           error: "You must be logged in to attach a customer account",
-//         });
-//       }
-
-//       const selectedCustomer = await Customer.findByUUID(customer_uuid);
-
-//       if (!selectedCustomer) {
-//         return res.status(404).json({
-//           error: "Customer not found",
-//         });
-//       }
-
-//       if (selectedCustomer.user_uuid !== actorUserUuid) {
-//         return res.status(403).json({
-//           error: "You are not allowed to use this customer account",
-//         });
-//       }
-
-//       customer = selectedCustomer;
-//     } else {
-//       customer = await Customer.findByEmailAndName(email, firstName, lastName);
-
-//       if (!customer) {
-//         let customerUUID;
-//         while (true) {
-//           customerUUID = generatePrefixedId("C", 8);
-//           const exists = await Customer.findByUUID(customerUUID);
-//           if (!exists) break;
-//         }
-
-//         customer = await Customer.create({
-//           uuid: customerUUID,
-//           user_uuid: actorUserUuid || null,
-//           first_name: quote.contact_first_name ?? null,
-//           last_name: quote.contact_last_name ?? null,
-//           email,
-//           mobile_phone: quote.contact_mobile ?? null,
-//           landline_phone: quote.contact_landline ?? null,
-//           address: quote.address ?? null,
-//           created_via: "quote_accept",
-//         });
-
-//         customerCreated = true;
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "create",
-//           summary: "Customer record created from accepted quote",
-//           changed_fields: {
-//             uuid: { old: null, new: customer.uuid },
-//             user_uuid: { old: null, new: customer.user_uuid ?? null },
-//             first_name: { old: null, new: customer.first_name ?? null },
-//             last_name: { old: null, new: customer.last_name ?? null },
-//             email: { old: null, new: customer.email ?? null },
-//             mobile_phone: { old: null, new: customer.mobile_phone ?? null },
-//             landline_phone: { old: null, new: customer.landline_phone ?? null },
-//             address: { old: null, new: customer.address ?? null },
-//             created_via: { old: null, new: customer.created_via ?? null },
-//           },
-//           source: "customer_portal",
-//         });
-//       }
-//     }
-
-//     if (customer?.uuid) {
-//       const customerPhoneUpdates = {};
-//       const customerPhoneChangedFields = {};
-
-//       const currentMobile =
-//         customer.mobile_phone?.trim?.() || customer.mobile?.trim?.() || "";
-//       const currentLandline =
-//         customer.landline_phone?.trim?.() || customer.landline?.trim?.() || "";
-//       const quoteMobile = quote.contact_mobile?.trim?.() || "";
-//       const quoteLandline = quote.contact_landline?.trim?.() || "";
-
-//       if (!currentMobile && quoteMobile) {
-//         customerPhoneUpdates.mobile_phone = quoteMobile;
-//         customerPhoneChangedFields.mobile_phone = {
-//           old: customer.mobile_phone ?? customer.mobile ?? null,
-//           new: quoteMobile,
-//         };
-//       }
-
-//       if (!currentLandline && quoteLandline) {
-//         customerPhoneUpdates.landline_phone = quoteLandline;
-//         customerPhoneChangedFields.landline_phone = {
-//           old: customer.landline_phone ?? customer.landline ?? null,
-//           new: quoteLandline,
-//         };
-//       }
-
-//       if (Object.keys(customerPhoneUpdates).length > 0) {
-//         const updatedCustomer = await Customer.updateByUUID(
-//           customer.uuid,
-//           customerPhoneUpdates
-//         );
-
-//         customer = updatedCustomer || {
-//           ...customer,
-//           ...customerPhoneUpdates,
-//         };
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "update",
-//           summary: "Customer phone details filled from accepted quote",
-//           changed_fields: customerPhoneChangedFields,
-//           source: "customer_portal",
-//         });
-//       }
-//     }
-
-//     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
-//     if (existingJob) {
-//       return res.status(400).json({
-//         error: "A job already exists for this quote",
-//         job_uuid: existingJob.uuid,
-//       });
-//     }
-
-//     const normalizedRecurrenceFrequency =
-//       quote.recurrence_frequency || "one_off";
-
-//     const isRecurring = normalizedRecurrenceFrequency !== "one_off";
-
-//     const recurrenceInterval =
-//       normalizedRecurrenceFrequency === "weekly"
-//         ? 1
-//         : normalizedRecurrenceFrequency === "fortnightly"
-//         ? 2
-//         : normalizedRecurrenceFrequency === "monthly"
-//         ? 1
-//         : null;
-
-//     let jobUUID;
-//     while (true) {
-//       jobUUID = generatePrefixedId("J", 8);
-//       const exists = await Job.findByUUID(jobUUID);
-//       if (!exists) break;
-//     }
-
-//     job = await Job.createFromQuote({
-//       quote,
-//       uuid: jobUUID,
-//       customer_uuid: customer.uuid,
-//       scheduled_at: null,
-//       is_recurring: isRecurring,
-//       recurrence_interval: recurrenceInterval,
-//       recurrence_frequency: normalizedRecurrenceFrequency,
-//       recurrence_end_date: null,
-//     });
-
-//     jobCreated = true;
-
-//     await createChangeLogSafe({
-//       table_name: "jobs",
-//       record_uuid: job.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "create",
-//       summary: "Job created from accepted quote",
-//       changed_fields: {
-//         uuid: { old: null, new: job.uuid },
-//         customer_uuid: { old: null, new: job.customer_uuid ?? customer.uuid },
-//         quote_uuid: { old: null, new: quote.uuid },
-//         scheduled_at: { old: null, new: job.scheduled_at ?? null },
-//         is_recurring: { old: null, new: job.is_recurring ?? false },
-//         recurrence_interval: {
-//           old: null,
-//           new: job.recurrence_interval ?? null,
-//         },
-//         recurrence_frequency: {
-//           old: null,
-//           new: job.recurrence_frequency ?? null,
-//         },
-//         recurrence_end_date: {
-//           old: null,
-//           new: job.recurrence_end_date ?? null,
-//         },
-//       },
-//       source: "customer_portal",
-//     });
-
-//     const filePath = `quotes/${uuid}/quote-${uuid}.pdf`;
-
-//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
-
-//     const pdfBuffer = await generateQuotePDF(acceptedQuote, customer);
-
-//     const { error: uploadError } = await supabase.storage
-//       .from("quotes-pdf")
-//       .upload(filePath, pdfBuffer, {
-//         contentType: "application/pdf",
-//         upsert: true,
-//       });
-
-//     if (uploadError) throw uploadError;
-
-//     const { data: publicData } = supabase.storage
-//       .from("quotes-pdf")
-//       .getPublicUrl(filePath);
-
-//     const pdfUrl = publicData.publicUrl;
-
-//     const updatedQuote = await Quote.updateByUUID(uuid, {
-//       quote_pdf_url: pdfUrl,
-//       quote_pdf_version: (acceptedQuote.quote_pdf_version ?? 0) + 1,
-//       quote_version_reason: "quote_accepted",
-//     });
-
-//     const acceptedFields = {};
-//     const acceptanceFieldsToTrack = [
-//       "status",
-//       "responded_at",
-//       "customer_uuid",
-//       "recurrence_frequency",
-//     ];
-
-//     for (const field of acceptanceFieldsToTrack) {
-//       const beforeValue = quoteSnapshot?.[field] ?? null;
-//       const afterValue = acceptedQuote?.[field] ?? null;
-
-//       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
-//         acceptedFields[field] = {
-//           old: beforeValue,
-//           new: afterValue,
-//         };
-//       }
-//     }
-
-//     await createChangeLogSafe({
-//       table_name: "quotes",
-//       record_uuid: acceptedQuote.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "update",
-//       summary: "Customer accepted quote",
-//       changed_fields: acceptedFields,
-//       source: "customer_portal",
-//     });
-
-//     const pdfFields = {};
-//     const pdfFieldsToTrack = [
-//       "quote_pdf_url",
-//       "quote_pdf_version",
-//       "quote_version_reason",
-//     ];
-
-//     for (const field of pdfFieldsToTrack) {
-//       const beforeValue = acceptedQuote?.[field] ?? null;
-//       const afterValue = updatedQuote?.[field] ?? null;
-
-//       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
-//         pdfFields[field] = {
-//           old: beforeValue,
-//           new: afterValue,
-//         };
-//       }
-//     }
-
-//     await createChangeLogSafe({
-//       table_name: "quotes",
-//       record_uuid: updatedQuote.uuid,
-//       user_uuid: actorUserUuid,
-//       action: "update",
-//       summary: "Accepted quote PDF regenerated and version updated",
-//       changed_fields: pdfFields,
-//       source: "customer_portal",
-//     });
-
-//     await QuoteAccessToken.revokeAllForQuote(quote.uuid);
-
-//     try {
-//       await sendQuoteAccepted({
-//         to: quote.contact_email,
-//         quote: updatedQuote,
-//         pdfBuffer,
-//       });
-//     } catch (err) {
-//       console.error("Failed to send accepted email:", err);
-//     }
-
-//     return res.status(200).json({
-//       message: "Quote accepted successfully",
-//       quote: updatedQuote,
-//       customer,
-//       job,
-//     });
-//   } catch (error) {
-//     console.error("Accept quote error:", error);
-
-//     if (jobCreated && job?.uuid) {
-//       await Job.deleteByUUID(job.uuid).catch(console.error);
-//     }
-
-//     if (customerCreated && customer?.uuid) {
-//       await Customer.deleteByUUID(customer.uuid).catch(console.error);
-//     }
-
-//     return res.status(500).json({ error: error.message });
-//   }
-// };
-
-// export const acceptQuote = async (req, res) => {
-//   const { uuid } = req.params;
-//   const { token, customer_uuid } = req.body;
-
-//   const actorUserUuid = req.user?.uuid || null;
-
-//   if (!uuid) {
-//     return res.status(400).json({ error: "Quote UUID is required" });
-//   }
-
-//   if (!token) {
-//     return res.status(401).json({ error: "Token required" });
-//   }
-
-//   let customerCreated = false;
-//   let jobCreated = false;
-//   let customer = null;
-//   let job = null;
-
-//   try {
-//     const quote = await Quote.findByUUID(uuid);
 //     if (!quote) {
 //       return res.status(404).json({ error: "Quote not found" });
 //     }
@@ -2262,6 +1914,12 @@ export const hardDeleteQuote = async (req, res) => {
 //       return res.status(400).json({
 //         error: "Quote already responded to",
 //         responded_at: quote.responded_at,
+//       });
+//     }
+
+//     if (!quote.terms_uuid || !quote.terms_version) {
+//       return res.status(400).json({
+//         error: "Quote terms reference is missing",
 //       });
 //     }
 
@@ -2282,6 +1940,8 @@ export const hardDeleteQuote = async (req, res) => {
 
 //     const email = quote.contact_email.trim().toLowerCase();
 
+//     // ---------------- CUSTOMER ----------------
+
 //     if (customer_uuid) {
 //       const selectedCustomer = await Customer.findByUUID(customer_uuid);
 
@@ -2297,6 +1957,7 @@ export const hardDeleteQuote = async (req, res) => {
 
 //       if (!customer) {
 //         let customerUUID;
+
 //         while (true) {
 //           customerUUID = generatePrefixedId("C", 8);
 //           const exists = await Customer.findByUUID(customerUUID);
@@ -2316,79 +1977,13 @@ export const hardDeleteQuote = async (req, res) => {
 //         });
 
 //         customerCreated = true;
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "create",
-//           summary: "Customer record created from accepted quote",
-//           changed_fields: {
-//             uuid: { old: null, new: customer.uuid },
-//             first_name: { old: null, new: customer.first_name ?? null },
-//             last_name: { old: null, new: customer.last_name ?? null },
-//             email: { old: null, new: customer.email ?? null },
-//             mobile_phone: { old: null, new: customer.mobile_phone ?? null },
-//             landline_phone: { old: null, new: customer.landline_phone ?? null },
-//             address: { old: null, new: customer.address ?? null },
-//             created_by_uuid: { old: null, new: customer.created_by_uuid ?? null },
-//             created_via: { old: null, new: customer.created_via ?? null },
-//           },
-//           source: "customer_portal",
-//         });
 //       }
 //     }
 
-//     if (customer?.uuid) {
-//       const customerPhoneUpdates = {};
-//       const customerPhoneChangedFields = {};
-
-//       const currentMobile = customer.mobile_phone?.trim() || "";
-//       const currentLandline = customer.landline_phone?.trim() || "";
-
-//       const quoteMobile = quote.contact_mobile?.trim() || "";
-//       const quoteLandline = quote.contact_landline?.trim() || "";
-
-//       if (!currentMobile && quoteMobile) {
-//         customerPhoneUpdates.mobile_phone = quoteMobile;
-//         customerPhoneChangedFields.mobile_phone = {
-//           old: customer.mobile_phone ?? null,
-//           new: quoteMobile,
-//         };
-//       }
-
-//       if (!currentLandline && quoteLandline) {
-//         customerPhoneUpdates.landline_phone = quoteLandline;
-//         customerPhoneChangedFields.landline_phone = {
-//           old: customer.landline_phone ?? null,
-//           new: quoteLandline,
-//         };
-//       }
-
-//       if (Object.keys(customerPhoneUpdates).length > 0) {
-//         const updatedCustomer = await Customer.updateByUUID(
-//           customer.uuid,
-//           customerPhoneUpdates
-//         );
-
-//         customer = updatedCustomer || {
-//           ...customer,
-//           ...customerPhoneUpdates,
-//         };
-
-//         await createChangeLogSafe({
-//           table_name: "customers",
-//           record_uuid: customer.uuid,
-//           user_uuid: actorUserUuid,
-//           action: "update",
-//           summary: "Customer phone details filled from accepted quote",
-//           changed_fields: customerPhoneChangedFields,
-//           source: "customer_portal",
-//         });
-//       }
-//     }
+//     // ---------------- JOB ----------------
 
 //     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
+
 //     if (existingJob) {
 //       return res.status(400).json({
 //         error: "A job already exists for this quote",
@@ -2396,8 +1991,7 @@ export const hardDeleteQuote = async (req, res) => {
 //       });
 //     }
 
-//     const normalizedRecurrenceFrequency =
-//       quote.recurrence_frequency || "one_off";
+//     const normalizedRecurrenceFrequency = quote.recurrence_frequency || "one_off";
 
 //     const isRecurring = normalizedRecurrenceFrequency !== "one_off";
 
@@ -2411,6 +2005,7 @@ export const hardDeleteQuote = async (req, res) => {
 //         : null;
 
 //     let jobUUID;
+
 //     while (true) {
 //       jobUUID = generatePrefixedId("J", 8);
 //       const exists = await Job.findByUUID(jobUUID);
@@ -2430,13 +2025,243 @@ export const hardDeleteQuote = async (req, res) => {
 
 //     jobCreated = true;
 
-//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
+//     // ---------------- ACCEPT QUOTE ----------------
+
+//     const acceptedAt = new Date().toISOString();
+
+//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid, {
+//       accepted_terms_at: acceptedAt,
+//       terms_accepted_ip: req.ip || null,
+//       terms_accepted_user_agent: req.headers["user-agent"] || null,
+//     });
+
+//     // ---------------- TERMS ACCEPTANCE ----------------
+
+//     const acceptanceRecord = await createQuoteTermsAcceptanceRecord({
+//       quote,
+//       req,
+//       acceptedAt,
+//     });
+
+//     // ---------------- RESPONSE ----------------
 
 //     return res.status(200).json({
 //       message: "Quote accepted successfully",
 //       quote: acceptedQuote,
 //       customer,
 //       job,
+//       terms_acceptance: acceptanceRecord,
+//     });
+
+//   } catch (error) {
+//     console.error("Accept quote error:", error);
+
+//     if (jobCreated && job?.uuid) {
+//       await Job.deleteByUUID(job.uuid).catch(console.error);
+//     }
+
+//     if (customerCreated && customer?.uuid) {
+//       await Customer.deleteByUUID(customer.uuid).catch(console.error);
+//     }
+
+//     return res.status(500).json({ error: error.message });
+//   }
+// };
+
+// export const acceptQuote = async (req, res) => {
+//   const { uuid } = req.params;
+//   const { customer_uuid } = req.body;
+
+//   const actorUserUuid = req.user?.uuid || null;
+//   const sessionToken = req.cookies?.quote_session;
+
+//   if (!uuid) {
+//     return res.status(400).json({ error: "Quote UUID is required" });
+//   }
+
+//   if (!sessionToken) {
+//     return res.status(401).json({ error: "No active quote session" });
+//   }
+
+//   let customerCreated = false;
+//   let jobCreated = false;
+//   let customer = null;
+//   let job = null;
+
+//   const clearQuoteSession = () => {
+//     res.clearCookie("quote_session", {
+//       httpOnly: true,
+//       secure: process.env.NODE_ENV === "production",
+//       sameSite: "lax",
+//       path: "/",
+//     });
+//   };
+
+//   try {
+//     const quote = await Quote.findByUUID(uuid);
+
+//     if (!quote) {
+//       clearQuoteSession();
+//       return res.status(404).json({ error: "Quote not found" });
+//     }
+
+//     if (quote.responded_at) {
+//       return res.status(400).json({
+//         error: "Quote already responded to",
+//         responded_at: quote.responded_at,
+//       });
+//     }
+
+//     if (!quote.terms_uuid || !quote.terms_version) {
+//       return res.status(400).json({
+//         error: "Quote terms reference is missing",
+//       });
+//     }
+
+//     const tokenHash = hashToken(sessionToken);
+//     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
+
+//     if (!tokenRecord) {
+//       clearQuoteSession();
+//       return res.status(401).json({ error: "Invalid or expired session" });
+//     }
+
+//     if (tokenRecord.quote_uuid !== quote.uuid) {
+//       clearQuoteSession();
+//       return res.status(403).json({
+//         error: "Session does not match requested quote",
+//       });
+//     }
+
+//     if (tokenRecord.expires_at && new Date(tokenRecord.expires_at) < new Date()) {
+//       clearQuoteSession();
+//       return res.status(401).json({ error: "Session expired" });
+//     }
+
+//     const quoteExpiry = new Date(quote.expiry_end);
+//     if (Number.isNaN(quoteExpiry.getTime()) || quoteExpiry < new Date()) {
+//       clearQuoteSession();
+//       return res.status(401).json({ error: "Quote expired" });
+//     }
+
+//     if (!quote.contact_email?.trim()) {
+//       return res.status(400).json({ error: "Quote email is required" });
+//     }
+
+//     const email = quote.contact_email.trim().toLowerCase();
+
+//     // ---------------- CUSTOMER ----------------
+
+//     if (customer_uuid) {
+//       const selectedCustomer = await Customer.findByUUID(customer_uuid);
+
+//       if (!selectedCustomer) {
+//         return res.status(404).json({
+//           error: "Customer not found",
+//         });
+//       }
+
+//       customer = selectedCustomer;
+//     } else {
+//       customer = await Customer.findByEmail(email);
+
+//       if (!customer) {
+//         let customerUUID;
+
+//         while (true) {
+//           customerUUID = generatePrefixedId("C", 8);
+//           const exists = await Customer.findByUUID(customerUUID);
+//           if (!exists) break;
+//         }
+
+//         customer = await Customer.create({
+//           uuid: customerUUID,
+//           first_name: quote.contact_first_name ?? null,
+//           last_name: quote.contact_last_name ?? null,
+//           email,
+//           mobile_phone: quote.contact_mobile ?? null,
+//           landline_phone: quote.contact_landline ?? null,
+//           address: quote.address ?? null,
+//           created_by_uuid: actorUserUuid || null,
+//           created_via: "quote_accept",
+//         });
+
+//         customerCreated = true;
+//       }
+//     }
+
+//     // ---------------- JOB ----------------
+
+//     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
+
+//     if (existingJob) {
+//       return res.status(400).json({
+//         error: "A job already exists for this quote",
+//         job_uuid: existingJob.uuid,
+//       });
+//     }
+
+//     const normalizedRecurrenceFrequency = quote.recurrence_frequency || "one_off";
+
+//     const isRecurring = normalizedRecurrenceFrequency !== "one_off";
+
+//     const recurrenceInterval =
+//       normalizedRecurrenceFrequency === "weekly"
+//         ? 1
+//         : normalizedRecurrenceFrequency === "fortnightly"
+//         ? 2
+//         : normalizedRecurrenceFrequency === "monthly"
+//         ? 1
+//         : null;
+
+//     let jobUUID;
+
+//     while (true) {
+//       jobUUID = generatePrefixedId("J", 8);
+//       const exists = await Job.findByUUID(jobUUID);
+//       if (!exists) break;
+//     }
+
+//     job = await Job.createFromQuote({
+//       quote,
+//       uuid: jobUUID,
+//       customer_uuid: customer.uuid,
+//       scheduled_at: null,
+//       is_recurring: isRecurring,
+//       recurrence_interval: recurrenceInterval,
+//       recurrence_frequency: normalizedRecurrenceFrequency,
+//       recurrence_end_date: null,
+//     });
+
+//     jobCreated = true;
+
+//     // ---------------- ACCEPT QUOTE ----------------
+
+//     const acceptedAt = new Date().toISOString();
+
+//     const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid, {
+//       accepted_terms_at: acceptedAt,
+//       terms_accepted_ip: req.ip || null,
+//       terms_accepted_user_agent: req.headers["user-agent"] || null,
+//     });
+
+//     // ---------------- TERMS ACCEPTANCE ----------------
+
+//     const acceptanceRecord = await createQuoteTermsAcceptanceRecord({
+//       quote,
+//       req,
+//       acceptedAt,
+//     });
+
+//     // optional: keep cookie until quote expiry, or clear it here if you want
+//     // clearQuoteSession();
+
+//     return res.status(200).json({
+//       message: "Quote accepted successfully",
+//       quote: acceptedQuote,
+//       customer,
+//       job,
+//       terms_acceptance: acceptanceRecord,
 //     });
 //   } catch (error) {
 //     console.error("Accept quote error:", error);
@@ -2452,18 +2277,20 @@ export const hardDeleteQuote = async (req, res) => {
 //     return res.status(500).json({ error: error.message });
 //   }
 // };
+
 export const acceptQuote = async (req, res) => {
   const { uuid } = req.params;
-  const { token, customer_uuid } = req.body;
+  const { customer_uuid } = req.body;
 
   const actorUserUuid = req.user?.uuid || null;
+  const sessionToken = req.cookies?.quote_session;
 
   if (!uuid) {
     return res.status(400).json({ error: "Quote UUID is required" });
   }
 
-  if (!token) {
-    return res.status(401).json({ error: "Token required" });
+  if (!sessionToken) {
+    return res.status(401).json({ error: "No active quote session" });
   }
 
   let customerCreated = false;
@@ -2471,9 +2298,20 @@ export const acceptQuote = async (req, res) => {
   let customer = null;
   let job = null;
 
+  const clearQuoteSession = () => {
+    res.clearCookie("quote_session", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+    });
+  };
+
   try {
     const quote = await Quote.findByUUID(uuid);
+
     if (!quote) {
+      clearQuoteSession();
       return res.status(404).json({ error: "Quote not found" });
     }
 
@@ -2484,15 +2322,36 @@ export const acceptQuote = async (req, res) => {
       });
     }
 
-    const tokenHash = hashToken(token);
-    const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
-
-    if (!tokenRecord || tokenRecord.quote_uuid !== quote.uuid) {
-      return res.status(401).json({ error: "Invalid token" });
+    if (!quote.terms_uuid || !quote.terms_version) {
+      return res.status(400).json({
+        error: "Quote terms reference is missing",
+      });
     }
 
-    if (new Date(tokenRecord.expires_at) < new Date()) {
-      return res.status(401).json({ error: "Token expired" });
+    const tokenHash = hashToken(sessionToken);
+    const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
+
+    if (!tokenRecord) {
+      clearQuoteSession();
+      return res.status(401).json({ error: "Invalid or expired session" });
+    }
+
+    if (tokenRecord.quote_uuid !== quote.uuid) {
+      clearQuoteSession();
+      return res.status(403).json({
+        error: "Session does not match requested quote",
+      });
+    }
+
+    if (tokenRecord.expires_at && new Date(tokenRecord.expires_at) < new Date()) {
+      clearQuoteSession();
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    const quoteExpiry = new Date(quote.expiry_end);
+    if (Number.isNaN(quoteExpiry.getTime()) || quoteExpiry < new Date()) {
+      clearQuoteSession();
+      return res.status(401).json({ error: "Quote expired" });
     }
 
     if (!quote.contact_email?.trim()) {
@@ -2500,6 +2359,8 @@ export const acceptQuote = async (req, res) => {
     }
 
     const email = quote.contact_email.trim().toLowerCase();
+
+    // ---------------- CUSTOMER ----------------
 
     if (customer_uuid) {
       const selectedCustomer = await Customer.findByUUID(customer_uuid);
@@ -2516,6 +2377,7 @@ export const acceptQuote = async (req, res) => {
 
       if (!customer) {
         let customerUUID;
+
         while (true) {
           customerUUID = generatePrefixedId("C", 8);
           const exists = await Customer.findByUUID(customerUUID);
@@ -2535,79 +2397,12 @@ export const acceptQuote = async (req, res) => {
         });
 
         customerCreated = true;
-
-        await createChangeLogSafe({
-          table_name: "customers",
-          record_uuid: customer.uuid,
-          user_uuid: actorUserUuid,
-          action: "create",
-          summary: "Customer record created from accepted quote",
-          changed_fields: {
-            uuid: { old: null, new: customer.uuid },
-            first_name: { old: null, new: customer.first_name ?? null },
-            last_name: { old: null, new: customer.last_name ?? null },
-            email: { old: null, new: customer.email ?? null },
-            mobile_phone: { old: null, new: customer.mobile_phone ?? null },
-            landline_phone: { old: null, new: customer.landline_phone ?? null },
-            address: { old: null, new: customer.address ?? null },
-            created_by_uuid: { old: null, new: customer.created_by_uuid ?? null },
-            created_via: { old: null, new: customer.created_via ?? null },
-          },
-          source: "customer_portal",
-        });
       }
     }
 
-    if (customer?.uuid) {
-      const customerPhoneUpdates = {};
-      const customerPhoneChangedFields = {};
-
-      const currentMobile = customer.mobile_phone?.trim() || "";
-      const currentLandline = customer.landline_phone?.trim() || "";
-
-      const quoteMobile = quote.contact_mobile?.trim() || "";
-      const quoteLandline = quote.contact_landline?.trim() || "";
-
-      if (!currentMobile && quoteMobile) {
-        customerPhoneUpdates.mobile_phone = quoteMobile;
-        customerPhoneChangedFields.mobile_phone = {
-          old: customer.mobile_phone ?? null,
-          new: quoteMobile,
-        };
-      }
-
-      if (!currentLandline && quoteLandline) {
-        customerPhoneUpdates.landline_phone = quoteLandline;
-        customerPhoneChangedFields.landline_phone = {
-          old: customer.landline_phone ?? null,
-          new: quoteLandline,
-        };
-      }
-
-      if (Object.keys(customerPhoneUpdates).length > 0) {
-        const updatedCustomer = await Customer.updateByUUID(
-          customer.uuid,
-          customerPhoneUpdates
-        );
-
-        customer = updatedCustomer || {
-          ...customer,
-          ...customerPhoneUpdates,
-        };
-
-        await createChangeLogSafe({
-          table_name: "customers",
-          record_uuid: customer.uuid,
-          user_uuid: actorUserUuid,
-          action: "update",
-          summary: "Customer phone details filled from accepted quote",
-          changed_fields: customerPhoneChangedFields,
-          source: "customer_portal",
-        });
-      }
-    }
-
+    // ---------------- JOB ----------------  
     const existingJob = await Job.findJobByQuoteUUID(quote.uuid);
+
     if (existingJob) {
       return res.status(400).json({
         error: "A job already exists for this quote",
@@ -2629,6 +2424,7 @@ export const acceptQuote = async (req, res) => {
         : null;
 
     let jobUUID;
+
     while (true) {
       jobUUID = generatePrefixedId("J", 8);
       const exists = await Job.findByUUID(jobUUID);
@@ -2648,13 +2444,60 @@ export const acceptQuote = async (req, res) => {
 
     jobCreated = true;
 
-    const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid);
+    // ---------------- ACCEPT QUOTE ----------------
+
+    const acceptedAt = new Date().toISOString();
+
+    const acceptedQuote = await Quote.acceptQuote(uuid, customer.uuid, {
+      accepted_terms_at: acceptedAt,
+      terms_accepted_ip: req.ip || null,
+      terms_accepted_user_agent: req.headers["user-agent"] || null,
+    });
+
+    // ---------------- TERMS ACCEPTANCE ----------------
+
+    const acceptanceRecord = await createQuoteTermsAcceptanceRecord({
+      quote,
+      req,
+      acceptedAt,
+    });
+
+    // ---------------- EMAIL BUSINESS TO SCHEDULE ----------------
+
+    try {
+      const employeeScheduleLink = `${process.env.CLIENT_URL}/employee/jobs/uuid/${job.uuid}`;
+
+      await sendQuoteAcceptedToBusiness({
+        quoteUuid: acceptedQuote.uuid,
+        jobUuid: job.uuid,
+        firstName: acceptedQuote.contact_first_name,
+        lastName: acceptedQuote.contact_last_name,
+        mobile: acceptedQuote.contact_mobile,
+        landline: acceptedQuote.contact_landline,
+        email: acceptedQuote.contact_email,
+        message: acceptedQuote.message,
+        services: acceptedQuote.services || [],
+        images: acceptedQuote.images || [],
+        address: acceptedQuote.address,
+        recurrenceFrequency: acceptedQuote.recurrence_frequency,
+        has_urgent_fee: Boolean(acceptedQuote.has_urgent_fee),
+        acceptedAt,
+        employeeScheduleLink,
+      });
+    } catch (emailError) {
+      console.error("Failed to send quote accepted business email:", emailError);
+      // do not fail quote acceptance just because email failed
+    }
+
+    // optional:
+    // clearQuoteSession();
 
     return res.status(200).json({
       message: "Quote accepted successfully",
       quote: acceptedQuote,
       customer,
       job,
+      terms_acceptance: acceptanceRecord,
     });
   } catch (error) {
     console.error("Accept quote error:", error);
@@ -2670,7 +2513,6 @@ export const acceptQuote = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
-
 
 export const rejectQuote = async (req, res) => {
   const { uuid } = req.params;

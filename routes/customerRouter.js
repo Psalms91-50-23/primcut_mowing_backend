@@ -42,7 +42,7 @@ const router = express.Router();
 // pagination http://localhost:4000/api/customers?page=2&pageSize=7
 router.get('/', getAllCustomersWithDetails);
 
-router.get("/me", requireAuth, getMyCustomer);
+router.get("/me", requireAuth, authenticatedRateLimit, requireRole(["customer"]), getMyCustomer);
 // GET one customers and details
 router.get('/one/details/uuid/:uuid', getOneCustomersWithDetails);
 

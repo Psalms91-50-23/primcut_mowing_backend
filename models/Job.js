@@ -1,4 +1,6 @@
 import supabase from '../config/db.js';
+import { normalizeNZPhone, generatePrefixedId, obfuscatePhoneNumber, obfuscateName, obfuscateEmail, obfuscateAddress } from "../util/util.js";
+import crypto from "crypto";
 
 function clampInt(n, fallback, min, max) {
   const x = parseInt(String(n), 10);
@@ -21,7 +23,183 @@ function buildSearchOr(terms, columns) {
   return filters.join(",");
 }
 
-class Job {
+export default class Job {
+
+  static async findByCustomerUUID(customerUuid) {
+    if (!customerUuid) return [];
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .select(`
+        uuid,
+        customer_uuid,
+        status,
+        title,
+        description,
+        address,
+        scheduled_date,
+        scheduled_start,
+        scheduled_end,
+        total_amount,
+        created_at,
+        updated_at,
+        deleted_at
+      `)
+      .eq("customer_uuid", customerUuid)
+      .is("deleted_at", null)
+      .order("scheduled_date", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    return data || [];
+  }
+
+  static async countActiveJobs() {
+    const { count, error } = await supabase
+      .from("jobs")
+      .select("*", { count: "exact", head: true })
+      .eq("is_deleted", false)
+      .is("deleted_at", null)
+      .eq("is_completed", false)
+      .is("completed_date", null)
+      .not("status", "in", '("completed","cancelled")');
+
+    if (error) {
+      throw new Error(`Error counting active jobs: ${error.message}`);
+    }
+
+    return count || 0;
+  }
+
+  static async countUpcomingJobs({ days = 7 } = {}) {
+    const now = new Date();
+    const future = new Date();
+    future.setDate(future.getDate() + days);
+
+    const { count, error } = await supabase
+      .from("jobs")
+      .select("*", { count: "exact", head: true })
+      .eq("is_deleted", false)
+      .is("deleted_at", null)
+      .eq("is_completed", false)
+      .is("completed_date", null)
+      .not("scheduled_at", "is", null)
+      .gte("scheduled_at", now.toISOString())
+      .lt("scheduled_at", future.toISOString())
+      .not("status", "in", '("completed","cancelled")');
+
+    if (error) {
+      throw new Error(`Error counting upcoming jobs: ${error.message}`);
+    }
+
+    return count || 0;
+  }
+
+  static async findPublicViewByUUID(uuid) {
+
+    if (!uuid) {
+      throw new Error("Job UUID is required");
+    }
+
+    const { data: job, error } = await supabase
+      .from("jobs")
+      .select(`
+        uuid,
+        status,
+        services,
+        subtotal_amount,
+        gst_amount,
+        has_urgent_fee,
+        urgent_fee_amount,
+        total_amount,
+        scheduled_at,
+        scheduled_window_mins,
+        scheduled_window_preset,
+        is_recurring,
+        recurrence_frequency,
+        recurrence_interval,
+        recurrence_end_date,
+        job_address,
+        client_schedule_message,
+        is_completed,
+        completed_date,
+        job_images,
+        customer:customers (
+          first_name,
+          last_name
+        )
+      `)
+      .eq("uuid", uuid)
+      .eq("is_deleted", false)
+      .single();
+
+    if (error) {
+      throw new Error(`Error fetching public job view: ${error.message}`);
+    }
+
+    let jobRecurrences = [];
+
+    if (job?.is_recurring) {
+      const { data: recurrences, error: recurrenceError } = await supabase
+        .from("job_recurrences")
+        .select(`
+          uuid,
+          scheduled_at,
+          scheduled_window_mins,
+          scheduled_window_preset,
+          status,
+          is_completed,
+          completed_date
+        `)
+        .eq("job_uuid", uuid)
+        .eq("is_deleted", false)
+        .order("scheduled_at", { ascending: true });
+
+      if (recurrenceError) {
+        throw new Error(`Error fetching job recurrences: ${recurrenceError.message}`);
+      }
+
+      jobRecurrences = recurrences || [];
+    }
+
+    return {
+      ...job,
+      customer: job?.customer
+        ? {
+            first_name: obfuscateName(job.customer.first_name),
+            last_name: obfuscateName(job.customer.last_name),
+          }
+        : null,
+      job_address: obfuscateAddress(job?.job_address),
+      recurrence_count: jobRecurrences.length,
+      recurrence_summary: job?.is_recurring
+        ? `${job.recurrence_frequency || "Recurring"}`
+        : "One-off",
+      job_recurrences: jobRecurrences,
+      limited: true,
+    };
+  }
+
+  static async markClientScheduleMessageSent(uuid) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({
+        client_schedule_message_sent_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("uuid", uuid)
+      .select("uuid, client_schedule_message_sent_at")
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to mark client schedule message sent: ${error.message}`);
+    }
+
+    return data;
+  }
 
   static async searchSummary(query, limit = 10) {
     const terms = String(query || "")
@@ -93,17 +271,6 @@ class Job {
     return data;
   }
 
-  // Find job by UUID
-//   static async findByUUID(uuid) {
-//     const { data, error } = await supabase
-//       .from('jobs')
-//       .select('*')
-//       .eq('uuid', uuid)
-//       .maybeSingle();
-//     if (error) throw new Error(`Error fetching job with UUID ${uuid}: ${error.message}`);
-//     return data;
-//   }
-
   static async findByUUID(uuid) {
     if (!uuid) throw new Error("Job UUID is required");
 
@@ -129,6 +296,7 @@ class Job {
       job_recurrences: (data.job_recurrences || []).filter((r) => r.is_deleted === false),
     };
   }
+
 
   static async updateScheduleByUUID(uuid, updates = {}) {
     if (!uuid) {
@@ -167,6 +335,18 @@ class Job {
       updatePayload.recurrence_end_date = updates.recurrence_end_date;
     }
 
+    if (updates.notes !== undefined) {
+      updatePayload.notes = updates.notes;
+    }
+
+    if (updates.client_schedule_message !== undefined) {
+      updatePayload.client_schedule_message = updates.client_schedule_message;
+    }
+
+    if (updates.status !== undefined) {
+      updatePayload.status = updates.status;
+    }
+
     const { data, error } = await supabase
       .from("jobs")
       .update(updatePayload)
@@ -181,34 +361,7 @@ class Job {
     return data;
   }
 
-  
-  // Create a job
-  // static async createFromQuote({ quote, uuid, scheduled_at, is_recurring, recurrence_interval, recurrence_frequency, recurrence_end_date, customer_uuid }) {
-  //       const { data, error } = await supabase
-  //           .from('jobs')
-  //           .insert([{
-  //               uuid,
-  //               customer_uuid: customer_uuid,
-  //               quote_uuid: quote.uuid,
-  //               services: quote.services,          // JSON array ✔
-  //               total_amount: quote.total_amount,
-  //               scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
-  //               is_recurring,
-  //               recurrence_interval,
-  //               recurrence_frequency,
-  //               recurrence_end_date: recurrence_end_date ?? null,
-  //               status: scheduled_at ? 'scheduled' : 'pending',
-  //               created_at: new Date().toISOString(),
-  //               updated_at: new Date().toISOString()
-  //           }])
-  //           .select('*')
-  //           .single();
-
-  //       if (error) throw new Error(`Error creating job: ${error.message}`);
-  //       return data;
-  //   }
-  // Create a job
-    static async createFromQuote({
+  static async createFromQuote({
       quote,
       uuid,
       scheduled_at,
@@ -252,8 +405,15 @@ class Job {
             customer_uuid,
             quote_uuid: quote.uuid,
             services: quote.services ?? [],
+
+            subtotal_amount: quote.subtotal_amount ?? 0,
+            gst_amount: quote.gst_amount ?? 0,
             total_amount: quote.total_amount ?? 0,
-            job_address: quote.address ?? null, // copy address from quote into job
+
+            has_urgent_fee: quote.has_urgent_fee ?? false,
+            urgent_fee_amount: quote.urgent_fee_amount ?? 0,
+
+            job_address: quote.address ?? null,
             scheduled_at: scheduled_at ? new Date(scheduled_at).toISOString() : null,
             is_recurring: normalizedIsRecurring,
             recurrence_interval: normalizedRecurrenceInterval,
@@ -571,9 +731,15 @@ class Job {
           recurrence_end_date,
           job_address,
           notes,
+          has_urgent_fee,
+          urgent_fee_amount,
+          subtotal_amount,
+          gst_amount,
           created_at,
           updated_at,
           is_deleted,
+          client_schedule_message,
+          client_schedule_message_sent_at,
           customers (
             uuid,
             first_name,
@@ -617,6 +783,7 @@ class Job {
             quote_sent_at,
             message,
             employer_message,
+            images,
             created_at,
             updated_at
           `)
@@ -694,6 +861,10 @@ class Job {
         quote_uuid: job.quote_uuid,
         status: job.status,
         services: Array.isArray(job.services) ? job.services : [],
+        subtotal_amount: job.subtotal_amount,
+        gst_amount: job.gst_amount,
+        has_urgent_fee: job.has_urgent_fee,
+        urgent_fee_amount: job.urgent_fee_amount,
         total_amount: job.total_amount,
         scheduled_at: job.scheduled_at,
         scheduled_window_mins: job.scheduled_window_mins ?? null,
@@ -709,6 +880,8 @@ class Job {
         notes: job.notes ?? null,
         created_at: job.created_at ?? null,
         updated_at: job.updated_at ?? null,
+        client_schedule_message: job.client_schedule_message ?? null,
+        client_schedule_message_sent_at: job.client_schedule_message_sent_at ?? null,
         customer,
         quote,
         job_recurrences: recs || [],
@@ -918,7 +1091,3 @@ class Job {
   }
 
 }
-
-
-
-export default Job;

@@ -1,6 +1,6 @@
 import supabase from '../config/db.js';
 
-class QuoteAccessToken {
+export default class QuoteAccessToken {
 
     static async create({ quote_uuid, token_hash, expires_at, uuid }) {
         const { data, error } = await supabase
@@ -136,5 +136,3 @@ class QuoteAccessToken {
         return data;
     }
 }
-
-export default QuoteAccessToken;

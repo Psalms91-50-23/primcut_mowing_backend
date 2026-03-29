@@ -1,4 +1,5 @@
 import Customer from "../models/Customer.js";
+import CustomerContact from "../models/CustomerContact.js";
 import Business from "../models/Business.js";
 import { createChangeLogSafe }  from "../util/createChangeLogSafe.js";
 import { normalizeNZPhone, generatePrefixedId } from "../util/util.js";
@@ -710,19 +711,44 @@ const getOneCustomersWithDetails = async (req, res) => {
   }
 };
 
+// export const getMyCustomer = async (req, res) => {
+//   try {
+//     const authUser = req.user;
+    
+//     if (!authUser?.uuid) {
+//       return res.status(401).json({ error: "Unauthorized" });
+//     }
+    
+//     if (authUser.customer_uuid) {
+//       return res.status(404).json({ error: "Customer not found" });
+//     }
+  
+//     const customer = await Customer.findByUUID(authUser.customer_uuid);
+//     if (!customer) {
+//       return res.status(404).json({ error: "Customer not found" });
+//     }
+
+//     return res.status(200).json({ customer });
+//   } catch (err) {
+//     console.error("getMyCustomer error:", err);
+//     return res.status(500).json({ error: "Failed to fetch customer" });
+//   }
+// };
+
 export const getMyCustomer = async (req, res) => {
   try {
     const authUser = req.user;
-    
+
     if (!authUser?.uuid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    
-    if (authUser.customer_uuid) {
+
+    if (!authUser.customer_uuid) {
       return res.status(404).json({ error: "Customer not found" });
     }
-  
+
     const customer = await Customer.findByUUID(authUser.customer_uuid);
+
     if (!customer) {
       return res.status(404).json({ error: "Customer not found" });
     }
@@ -754,23 +780,47 @@ const getAllCustomersWithDetails = async (req, res) => {
   }
 };
 
+// const getCustomerQuotes = async (req, res) => {
+//   const { uuid } = req.params;
+//   if (!uuid) {
+//     return res.status(400).json({ error: "Missing customer UUID" });
+//   }
+
+//   try {
+//     const quotes = await Customer.findQuotesByCustomerUUID(uuid);
+//     if (!quotes) {
+//       return res.status(404).json({ error: "Customer or quotes not found" });
+//     }
+//     return res.status(200).json(quotes);
+//   } catch (error) {
+//     return res.status(500).json({ error: error.message });
+//   }
+
+// }
+
 const getCustomerQuotes = async (req, res) => {
   const { uuid } = req.params;
+
   if (!uuid) {
     return res.status(400).json({ error: "Missing customer UUID" });
   }
 
   try {
-    const quotes = await Customer.findQuotesByCustomerUUID(uuid);
-    if (!quotes) {
-      return res.status(404).json({ error: "Customer or quotes not found" });
+    // ✅ check if customer exists
+    const customer = await Customer.findByUUID(uuid);
+
+    if (!customer) {
+      return res.status(404).json({ error: "Customer not found" });
     }
-    return res.status(200).json(quotes);
+
+    // ✅ then get quotes
+    const quotes = await Customer.findQuotesByCustomerUUID(uuid);
+    console.log({quotes})
+    return res.status(200).json(quotes || []);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-
-}
+};
 
 const getCustomerJobsAndRecurrences = async (req, res) => {
   const { uuid } = req.params;

@@ -5,7 +5,7 @@ import JobRecurrence from "../models/JobRecurrence.js";
 import sendJobScheduleToClient from '../lib/email/sendJobScheduleToClient.js';
 import  { createChangeLogSafe }  from '../util/createChangeLogSafe.js';
 import ChangeLog from '../models/ChangeLog.js';
-import { normalizeNZPhone, generatePrefixedId } from "../util/util.js";
+import { normalizeNZPhone, generatePrefixedId, obfuscatePhoneNumber, obfuscateName, obfuscateEmail, obfuscateAddress } from "../util/util.js";
 
 const UUID_REGEX = /^[a-zA-Z0-9]{9}$/;
 
@@ -49,17 +49,24 @@ function normalizeJobScheduleInput(job = {}) {
     recurrence_end_date = null,
     regenerate_recurrences = false,
     send_schedule_email = false,
-    custom_schedule_message = null,
+    notification_type = "schedule_update",
+    notes = null,
+    client_schedule_message = null,
   } = job;
 
   if (!(scheduled_at === null || isValidISODate(scheduled_at))) {
     throw new Error("job.scheduled_at must be a valid ISO date string or null");
   }
 
+  const normalizedWindowMins =
+    scheduled_window_mins === null || scheduled_window_mins === undefined
+      ? null
+      : Number(scheduled_window_mins);
+
   if (
     !(
-      scheduled_window_mins === null ||
-      (Number.isInteger(scheduled_window_mins) && scheduled_window_mins > 0)
+      normalizedWindowMins === null ||
+      (Number.isInteger(normalizedWindowMins) && normalizedWindowMins > 0)
     )
   ) {
     throw new Error("job.scheduled_window_mins must be a positive integer or null");
@@ -76,6 +83,11 @@ function normalizeJobScheduleInput(job = {}) {
     );
   }
 
+  const normalizedRecurrenceInterval =
+    recurrence_interval === null || recurrence_interval === undefined
+      ? null
+      : Number(recurrence_interval);
+
   if (is_recurring) {
     if (!allowedFrequencies.includes(recurrence_frequency)) {
       throw new Error(
@@ -83,7 +95,12 @@ function normalizeJobScheduleInput(job = {}) {
       );
     }
 
-    if (!(Number.isInteger(recurrence_interval) && recurrence_interval > 0)) {
+    if (
+      !(
+        Number.isInteger(normalizedRecurrenceInterval) &&
+        normalizedRecurrenceInterval > 0
+      )
+    ) {
       throw new Error("job.recurrence_interval must be a positive integer when recurring");
     }
   }
@@ -92,17 +109,32 @@ function normalizeJobScheduleInput(job = {}) {
     throw new Error("job.recurrence_end_date must be a valid ISO date string or null");
   }
 
+  const normalizedClientMessage =
+    typeof client_schedule_message === "string"
+      ? client_schedule_message.trim() || null
+      : null;
+
+  const normalizedNotes =
+    typeof notes === "string"
+      ? notes.trim() || null
+      : null;
+
+  const normalizedNotificationType =
+    notification_type === "rescheduled" ? "rescheduled" : "schedule_update";
+
   return {
     scheduled_at,
-    scheduled_window_mins,
+    scheduled_window_mins: normalizedWindowMins,
     scheduled_window_preset,
     is_recurring: Boolean(is_recurring),
     recurrence_frequency: is_recurring ? recurrence_frequency : null,
-    recurrence_interval: is_recurring ? recurrence_interval : null,
+    recurrence_interval: is_recurring ? normalizedRecurrenceInterval : null,
     recurrence_end_date: is_recurring ? recurrence_end_date : null,
     regenerate_recurrences: Boolean(regenerate_recurrences),
     send_schedule_email: Boolean(send_schedule_email),
-    custom_schedule_message,
+    notification_type: normalizedNotificationType,
+    notes: normalizedNotes,
+    client_schedule_message: normalizedClientMessage,
   };
 }
 
@@ -115,7 +147,7 @@ function normalizeRecurrenceScheduleInput(recurrence = {}) {
     is_custom_schedule = true,
     reset_to_job_default = false,
     send_schedule_email = false,
-    custom_schedule_message = null,
+    client_schedule_message = null,
   } = recurrence;
 
   if (!(Number.isInteger(id) || (typeof id === "string" && /^\d+$/.test(id)))) {
@@ -154,9 +186,243 @@ function normalizeRecurrenceScheduleInput(recurrence = {}) {
     is_custom_schedule: Boolean(is_custom_schedule),
     reset_to_job_default: Boolean(reset_to_job_default),
     send_schedule_email: Boolean(send_schedule_email),
-    custom_schedule_message,
+    client_schedule_message,
   };
 }
+
+export const getJobsByCustomerUUID = async (req, res) => {
+  const { customerUuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  if (!customerUuid) {
+    return res.status(400).json({ error: "Customer UUID is required" });
+  }
+
+  try {
+    const jobs = await Job.findByCustomerUUID(customerUuid);
+
+    return res.status(200).json({
+      jobs,
+      count: jobs.length,
+      customer_uuid: customerUuid,
+      actor_user_uuid: actorUserUuid,
+    });
+  } catch (error) {
+    console.error("getJobsByCustomerUUID error:", error);
+    return res.status(500).json({
+      error: "Failed to fetch jobs for customer",
+    });
+  }
+};
+
+
+export const createJobAccessToken = async (req, res) => {
+  const { uuid } = req.params;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Job UUID is required" });
+  }
+
+  try {
+    const tokenRecord = await Job.createAccessToken(uuid, 60);
+
+    return res.status(200).json({
+      success: true,
+      message: "Job access token created successfully",
+      access_token: {
+        uuid: tokenRecord.uuid,
+        job_uuid: tokenRecord.job_uuid,
+        expires_at: tokenRecord.expires_at,
+        created_at: tokenRecord.created_at,
+      },
+      plain_token: tokenRecord.plain_token,
+    });
+  } catch (error) {
+    console.error("createJobAccessToken error:", error);
+
+    return res.status(500).json({
+      error: error.message || "Failed to create job access token",
+    });
+  }
+};
+
+export const regenerateJobAccessToken = async (req, res) => {
+  const { uuid } = req.params;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Job UUID is required" });
+  }
+
+  try {
+    await Job.revokeAllAccessTokens(uuid);
+    const tokenRecord = await Job.createAccessToken(uuid, 60);
+
+    return res.status(200).json({
+      success: true,
+      message: "Job access token regenerated successfully",
+      access_token: {
+        uuid: tokenRecord.uuid,
+        job_uuid: tokenRecord.job_uuid,
+        expires_at: tokenRecord.expires_at,
+        created_at: tokenRecord.created_at,
+      },
+      plain_token: tokenRecord.plain_token,
+    });
+  } catch (error) {
+    console.error("regenerateJobAccessToken error:", error);
+
+    return res.status(500).json({
+      error: error.message || "Failed to regenerate job access token",
+    });
+  }
+};
+
+export const getPublicJobView = async (req, res) => {
+  const { uuid } = req.params;
+  const { token } = req.query;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Job UUID is required" });
+  }
+
+  if (!token) {
+    return res.status(401).json({ error: "Access token is required" });
+  }
+
+  try {
+    const tokenRecord = await Job.validateAccessToken(uuid, token);
+
+    if (!tokenRecord) {
+      return res.status(403).json({ error: "Invalid access token" });
+    }
+
+    if (tokenRecord?.expired) {
+      return res.status(410).json({
+        error: "This public job link has expired.",
+      });
+    }
+
+    const job = await Job.findPublicViewByUUID(uuid);
+
+    if (!job) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    if (job.is_completed && job.completed_date) {
+      const completedAt = new Date(job.completed_date);
+      const expiresAfterCompletion = new Date(completedAt);
+      expiresAfterCompletion.setDate(expiresAfterCompletion.getDate() + 14);
+
+      if (new Date() > expiresAfterCompletion) {
+        return res.status(410).json({
+          error: "This public job link is no longer available.",
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      job,
+    });
+  } catch (error) {
+    console.error("getPublicJobView error:", error);
+
+    return res.status(500).json({
+      error: error.message || "Failed to load public job view",
+    });
+  }
+};
+
+// export const getPublicJobView = async (req, res) => {
+//   const { uuid } = req.params;
+
+//   if (!uuid) {
+//     return res.status(400).json({ error: "Job UUID is required" });
+//   }
+
+//   try {
+//     const job = await Job.findPublicViewByUUID(uuid);
+
+//     if (!job) {
+//       return res.status(404).json({ error: "Job not found" });
+//     }
+
+//     const safeJob = {
+//       ...job,
+//       limited: true,
+
+//       job_address: job?.job_address ? obfuscateAddress(job.job_address) : null,
+
+//       customer: job?.customer
+//         ? {
+//             ...job.customer,
+//             first_name: job.customer.first_name
+//               ? obfuscateName(job.customer.first_name)
+//               : null,
+//             last_name: job.customer.last_name
+//               ? obfuscateName(job.customer.last_name)
+//               : null,
+//             full_name: job.customer.full_name
+//               ? `${obfuscateName(job.customer.first_name || "")} ${obfuscateName(
+//                   job.customer.last_name || ""
+//                 )}`.trim()
+//               : null,
+//             email: job.customer.email ? obfuscateEmail(job.customer.email) : null,
+//             mobile_phone: job.customer.mobile_phone
+//               ? obfuscatePhoneNumber(job.customer.mobile_phone)
+//               : null,
+//             landline_phone: job.customer.landline_phone
+//               ? obfuscatePhoneNumber(job.customer.landline_phone)
+//               : null,
+//             address: job.customer.address
+//               ? obfuscateAddress(job.customer.address)
+//               : null,
+//           }
+//         : null,
+
+//       quote: job?.quote
+//         ? {
+//             ...job.quote,
+//             contact_first_name: job.quote.contact_first_name
+//               ? obfuscateName(job.quote.contact_first_name)
+//               : null,
+//             contact_last_name: job.quote.contact_last_name
+//               ? obfuscateName(job.quote.contact_last_name)
+//               : null,
+//             contact_email: job.quote.contact_email
+//               ? obfuscateEmail(job.quote.contact_email)
+//               : null,
+//             contact_mobile: job.quote.contact_mobile
+//               ? obfuscatePhoneNumber(job.quote.contact_mobile)
+//               : null,
+//             contact_landline: job.quote.contact_landline
+//               ? obfuscatePhoneNumber(job.quote.contact_landline)
+//               : null,
+//             address: job.quote.address
+//               ? obfuscateAddress(job.quote.address)
+//               : null,
+//           }
+//         : null,
+
+//       job_recurrences: Array.isArray(job?.job_recurrences)
+//         ? job.job_recurrences.map((recurrence) => ({
+//             ...recurrence,
+//           }))
+//         : [],
+//     };
+
+//     return res.status(200).json({
+//       success: true,
+//       job: safeJob,
+//     });
+//   } catch (error) {
+//     console.error("getPublicJobView error:", error);
+
+//     return res.status(500).json({
+//       error: error.message || "Failed to load public job view",
+//     });
+//   }
+// };
 
 export const getJobRecurrences = async (req, res) => {
   const { uuid } = req.params;
@@ -188,221 +454,6 @@ export const getJobRecurrences = async (req, res) => {
   }
 };
 
-// export const updateJobSchedule = async (req, res) => {
-//   const { uuid } = req.params;
-//   const { mode, job, recurrence } = req.body || {};
-//   const actorUserUuid = req.user?.uuid || null;
-
-//   if (!uuid) {
-//     return res.status(400).json({ error: "Job UUID is required" });
-//   }
-
-//   if (!["job", "recurrence", "both"].includes(mode)) {
-//     return res.status(400).json({
-//       error: "mode must be one of: 'job', 'recurrence', 'both'",
-//     });
-//   }
-
-//   let previousJob = null;
-//   let previousRecurrence = null;
-//   let jobUpdated = false;
-//   let recurrenceUpdated = false;
-
-//   try {
-//     const existingJob = await Job.findDetailedByUUID(uuid);
-
-//     if (!existingJob) {
-//       return res.status(404).json({
-//         error: "Job not found",
-//       });
-//     }
-
-//     previousJob = {
-//       scheduled_at: existingJob.scheduled_at,
-//       scheduled_window_mins: existingJob.scheduled_window_mins,
-//       scheduled_window_preset: existingJob.scheduled_window_preset,
-//       is_recurring: existingJob.is_recurring,
-//       recurrence_frequency: existingJob.recurrence_frequency,
-//       recurrence_interval: existingJob.recurrence_interval,
-//       recurrence_end_date: existingJob.recurrence_end_date,
-//     };
-
-//     let updatedRecurrence = null;
-//     let normalizedJob = null;
-//     let normalizedRecurrence = null;
-
-//     if (mode === "job" || mode === "both") {
-//       normalizedJob = normalizeJobScheduleInput(job);
-
-//       await Job.updateScheduleByUUID(uuid, normalizedJob);
-//       jobUpdated = true;
-
-//       if (normalizedJob.is_recurring && normalizedJob.regenerate_recurrences) {
-//         await JobRecurrence.regenerateFutureForJob(uuid, {
-//           scheduled_at: normalizedJob.scheduled_at,
-//           scheduled_window_mins: normalizedJob.scheduled_window_mins,
-//           recurrence_frequency: normalizedJob.recurrence_frequency,
-//           recurrence_interval: normalizedJob.recurrence_interval,
-//           recurrence_end_date: normalizedJob.recurrence_end_date,
-//         });
-//       }
-//     }
-
-//     if (mode === "recurrence" || mode === "both") {
-//       normalizedRecurrence = normalizeRecurrenceScheduleInput(recurrence);
-
-//       const recurrenceExists = await JobRecurrence.findByIdForJob(
-//         uuid,
-//         normalizedRecurrence.id
-//       );
-
-//       if (!recurrenceExists) {
-//         return res.status(404).json({
-//           error: "Recurrence not found for this job",
-//         });
-//       }
-
-//       previousRecurrence = recurrenceExists;
-
-//       updatedRecurrence = await JobRecurrence.updateScheduleByIdForJob(
-//         uuid,
-//         normalizedRecurrence.id,
-//         normalizedRecurrence
-//       );
-//       recurrenceUpdated = true;
-//     }
-
-//     const fullJob = await Job.findDetailedByUUID(uuid);
-
-//     const shouldSendScheduleEmail =
-//       Boolean(normalizedJob?.send_schedule_email) ||
-//       Boolean(normalizedRecurrence?.send_schedule_email);
-
-//     if (shouldSendScheduleEmail) {
-//       const customerEmail =
-//         fullJob?.quote?.contact_email ||
-//         fullJob?.customer_email ||
-//         null;
-
-//       if (customerEmail) {
-//         const customerName =
-//           [fullJob?.quote?.contact_first_name, fullJob?.quote?.contact_last_name]
-//             .filter(Boolean)
-//             .join(" ") || "Customer";
-
-//         let scheduledAt = fullJob?.scheduled_at;
-//         let scheduledWindow = fullJob?.scheduled_window_mins;
-
-//         if (updatedRecurrence) {
-//           scheduledAt = updatedRecurrence?.scheduled_at ?? scheduledAt;
-//           scheduledWindow =
-//             updatedRecurrence?.scheduled_window_mins ?? scheduledWindow;
-//         }
-
-//         const customMessage =
-//           normalizedRecurrence?.custom_schedule_message ||
-//           normalizedJob?.custom_schedule_message ||
-//           null;
-
-//         await sendJobScheduleToClient({
-//           to: customerEmail,
-//           subject: `Job Schedule Update - ${fullJob.uuid}`,
-//           data: {
-//             jobUUID: fullJob.uuid,
-//             customerName,
-//             customerEmail,
-//             address: fullJob?.job_address,
-//             services: fullJob?.services || [],
-//             scheduledAt,
-//             scheduledWindowMins: scheduledWindow,
-//             customMessage,
-//             dashboardLink: `${process.env.FRONTEND_URL}/jobs/${fullJob.uuid}/view`,
-//           },
-//         });
-//       }
-//     }
-
-//     const changedFields = {};
-
-//     if (jobUpdated) {
-//       changedFields.job_schedule = {
-//         old: previousJob,
-//         new: {
-//           scheduled_at: fullJob.scheduled_at,
-//           scheduled_window_mins: fullJob.scheduled_window_mins,
-//           is_recurring: fullJob.is_recurring,
-//           recurrence_frequency: fullJob.recurrence_frequency,
-//           recurrence_interval: fullJob.recurrence_interval,
-//           recurrence_end_date: fullJob.recurrence_end_date,
-//         },
-//       };
-//     }
-
-//     if (recurrenceUpdated && previousRecurrence && updatedRecurrence) {
-//       changedFields.recurrence_schedule = {
-//         old: {
-//           id: previousRecurrence.id,
-//           scheduled_at: previousRecurrence.scheduled_at,
-//           scheduled_window_mins: previousRecurrence.scheduled_window_mins,
-//           is_custom_schedule: previousRecurrence.is_custom_schedule,
-//         },
-//         new: {
-//           id: updatedRecurrence.id,
-//           scheduled_at: updatedRecurrence.scheduled_at,
-//           scheduled_window_mins: updatedRecurrence.scheduled_window_mins,
-//           is_custom_schedule: updatedRecurrence.is_custom_schedule,
-//         },
-//       };
-//     }
-
-//     if (Object.keys(changedFields).length > 0) {
-//       await createChangeLogSafe({
-//         table_name: "jobs",
-//         record_uuid: uuid,
-//         user_uuid: actorUserUuid,
-//         action: "update",
-//         summary: "Job schedule updated.",
-//         changed_fields: {
-//           mode,
-//           ...changedFields,
-//           regenerate_recurrences: Boolean(normalizedJob?.regenerate_recurrences),
-//           send_schedule_email: shouldSendScheduleEmail,
-//         },
-//         source: "dashboard",
-//       });
-//     }
-
-//     return res.json({
-//       success: true,
-//       job: fullJob,
-//       recurrence: updatedRecurrence,
-//     });
-//   } catch (error) {
-//     console.error("updateJobSchedule error:", error);
-
-//     try {
-//       if (jobUpdated && previousJob) {
-//         await Job.updateScheduleByUUID(uuid, previousJob);
-//       }
-
-//       if (recurrenceUpdated && previousRecurrence) {
-//         await JobRecurrence.updateScheduleByIdForJob(
-//           uuid,
-//           previousRecurrence.id,
-//           previousRecurrence
-//         );
-//       }
-
-//       console.warn("Rollback successful");
-//     } catch (rollbackError) {
-//       console.error("Rollback failed:", rollbackError);
-//     }
-
-//     return res.status(500).json({
-//       error: error.message || "Failed to update schedule",
-//     });
-//   }
-// };
 export const updateJobSchedule = async (req, res) => {
   const { uuid } = req.params;
   const { mode, job, recurrence } = req.body || {};
@@ -420,16 +471,17 @@ export const updateJobSchedule = async (req, res) => {
 
   let previousJob = null;
   let previousRecurrence = null;
+  let previousFutureRecurrences = [];
+  let regeneratedRecurrences = false;
   let jobUpdated = false;
   let recurrenceUpdated = false;
+  let createdChangeLog = null;
 
   try {
     const existingJob = await Job.findDetailedByUUID(uuid);
 
     if (!existingJob) {
-      return res.status(404).json({
-        error: "Job not found",
-      });
+      return res.status(404).json({ error: "Job not found" });
     }
 
     previousJob = {
@@ -440,6 +492,9 @@ export const updateJobSchedule = async (req, res) => {
       recurrence_frequency: existingJob.recurrence_frequency,
       recurrence_interval: existingJob.recurrence_interval,
       recurrence_end_date: existingJob.recurrence_end_date,
+      client_schedule_message: existingJob.client_schedule_message,
+      notes: existingJob.notes,
+      status: existingJob.status,
     };
 
     let updatedRecurrence = null;
@@ -448,11 +503,22 @@ export const updateJobSchedule = async (req, res) => {
 
     if (mode === "job" || mode === "both") {
       normalizedJob = normalizeJobScheduleInput(job);
+      console.log("normalizedJob:", normalizedJob);
+
+      if (!existingJob.is_completed && existingJob.status !== "cancelled") {
+        if (normalizedJob.scheduled_at) {
+          normalizedJob.status = "scheduled";
+        } else {
+          normalizedJob.status = "pending";
+        }
+      }
 
       await Job.updateScheduleByUUID(uuid, normalizedJob);
       jobUpdated = true;
 
       if (normalizedJob.is_recurring && normalizedJob.regenerate_recurrences) {
+        previousFutureRecurrences = await JobRecurrence.findFutureByJobUUID(uuid);
+
         await JobRecurrence.regenerateFutureForJob(uuid, {
           scheduled_at: normalizedJob.scheduled_at,
           scheduled_window_mins: normalizedJob.scheduled_window_mins,
@@ -461,11 +527,14 @@ export const updateJobSchedule = async (req, res) => {
           recurrence_interval: normalizedJob.recurrence_interval,
           recurrence_end_date: normalizedJob.recurrence_end_date,
         });
+
+        regeneratedRecurrences = true;
       }
     }
 
     if (mode === "recurrence" || mode === "both") {
       normalizedRecurrence = normalizeRecurrenceScheduleInput(recurrence);
+      console.log("normalizedRecurrence:", normalizedRecurrence);
 
       const recurrenceExists = await JobRecurrence.findByIdForJob(
         uuid,
@@ -494,59 +563,26 @@ export const updateJobSchedule = async (req, res) => {
       recurrenceUpdated = true;
     }
 
-    const fullJob = await Job.findDetailedByUUID(uuid);
+    let fullJob = await Job.findDetailedByUUID(uuid);
 
     const shouldSendScheduleEmail =
       Boolean(normalizedJob?.send_schedule_email) ||
       Boolean(normalizedRecurrence?.send_schedule_email);
 
-    if (shouldSendScheduleEmail) {
-      const customerEmail =
-        fullJob?.quote?.contact_email ||
-        fullJob?.customer_email ||
-        null;
+    const notificationType =
+      normalizedJob?.notification_type ||
+      normalizedRecurrence?.notification_type ||
+      "schedule_update";
 
-      if (customerEmail) {
-        const customerName =
-          [fullJob?.quote?.contact_first_name, fullJob?.quote?.contact_last_name]
-            .filter(Boolean)
-            .join(" ") || "Customer";
-
-        let scheduledAt = fullJob?.scheduled_at;
-        let scheduledWindow = fullJob?.scheduled_window_mins;
-        let scheduledWindowPreset = fullJob?.scheduled_window_preset;
-
-        if (updatedRecurrence) {
-          scheduledAt = updatedRecurrence?.scheduled_at ?? scheduledAt;
-          scheduledWindow =
-            updatedRecurrence?.scheduled_window_mins ?? scheduledWindow;
-          scheduledWindowPreset =
-            updatedRecurrence?.scheduled_window_preset ?? scheduledWindowPreset;
-        }
-
-        const customMessage =
-          normalizedRecurrence?.custom_schedule_message ||
-          normalizedJob?.custom_schedule_message ||
-          null;
-
-        await sendJobScheduleToClient({
-          to: customerEmail,
-          subject: `Job Schedule Update - ${fullJob.uuid}`,
-          data: {
-            jobUUID: fullJob.uuid,
-            customerName,
-            customerEmail,
-            address: fullJob?.job_address,
-            services: fullJob?.services || [],
-            scheduledAt,
-            scheduledWindowMins: scheduledWindow,
-            scheduledWindowPreset,
-            customMessage,
-            dashboardLink: `${process.env.FRONTEND_URL}/jobs/${fullJob.uuid}/view`,
-          },
-        });
-      }
-    }
+    console.log("shouldSendScheduleEmail:", shouldSendScheduleEmail);
+    console.log(
+      "normalizedJob?.client_schedule_message:",
+      normalizedJob?.client_schedule_message
+    );
+    console.log(
+      "fullJob?.client_schedule_message before email:",
+      fullJob?.client_schedule_message
+    );
 
     const changedFields = {};
 
@@ -561,57 +597,159 @@ export const updateJobSchedule = async (req, res) => {
           recurrence_frequency: fullJob.recurrence_frequency,
           recurrence_interval: fullJob.recurrence_interval,
           recurrence_end_date: fullJob.recurrence_end_date,
+          client_schedule_message: fullJob.client_schedule_message,
+          notes: fullJob.notes,
+          status: fullJob.status,
         },
       };
     }
 
     if (recurrenceUpdated && previousRecurrence && updatedRecurrence) {
       changedFields.recurrence_schedule = {
-        old: {
-          id: previousRecurrence.id,
-          scheduled_at: previousRecurrence.scheduled_at,
-          scheduled_window_mins: previousRecurrence.scheduled_window_mins,
-          scheduled_window_preset: previousRecurrence.scheduled_window_preset,
-          is_custom_schedule: previousRecurrence.is_custom_schedule,
-        },
-        new: {
-          id: updatedRecurrence.id,
-          scheduled_at: updatedRecurrence.scheduled_at,
-          scheduled_window_mins: updatedRecurrence.scheduled_window_mins,
-          scheduled_window_preset: updatedRecurrence.scheduled_window_preset,
-          is_custom_schedule: updatedRecurrence.is_custom_schedule,
-        },
+        old: previousRecurrence,
+        new: updatedRecurrence,
       };
     }
 
     if (Object.keys(changedFields).length > 0) {
-      await createChangeLogSafe({
+      createdChangeLog = await createChangeLogSafe({
         table_name: "jobs",
         record_uuid: uuid,
         user_uuid: actorUserUuid,
         action: "update",
-        summary: "Job schedule updated.",
+        summary:
+          notificationType === "rescheduled"
+            ? "Job schedule rescheduled."
+            : "Job schedule updated.",
         changed_fields: {
           mode,
           ...changedFields,
           regenerate_recurrences: Boolean(normalizedJob?.regenerate_recurrences),
           send_schedule_email: shouldSendScheduleEmail,
+          notification_type: notificationType,
         },
         source: "dashboard",
       });
     }
 
+    let emailSent = false;
+    let emailError = null;
+
+    if (shouldSendScheduleEmail) {
+      const customerEmail =
+        fullJob?.quote?.contact_email ||
+        fullJob?.customer?.email ||
+        fullJob?.customer_email ||
+        null;
+
+      console.log("shouldSendScheduleEmail:", shouldSendScheduleEmail);
+      console.log("customerEmail:", customerEmail);
+
+      if (customerEmail) {
+        try {
+          const customerName =
+            [fullJob?.quote?.contact_first_name, fullJob?.quote?.contact_last_name]
+              .filter(Boolean)
+              .join(" ") ||
+            fullJob?.customer?.full_name ||
+            "Customer";
+
+          let scheduledAt = fullJob?.scheduled_at;
+          let scheduledWindow = fullJob?.scheduled_window_mins;
+          let scheduledWindowPreset = fullJob?.scheduled_window_preset;
+
+          if (updatedRecurrence) {
+            scheduledAt = updatedRecurrence?.scheduled_at ?? scheduledAt;
+            scheduledWindow =
+              updatedRecurrence?.scheduled_window_mins ?? scheduledWindow;
+            scheduledWindowPreset =
+              updatedRecurrence?.scheduled_window_preset ?? scheduledWindowPreset;
+          }
+
+          const customMessage =
+            normalizedJob?.client_schedule_message ??
+            fullJob?.client_schedule_message ??
+            null;
+
+          const subject =
+            notificationType === "rescheduled"
+              ? `Job Rescheduled - ${fullJob.uuid}`
+              : `Job Schedule Update - ${fullJob.uuid}`;
+
+          console.log("About to send schedule email", {
+            to: customerEmail,
+            subject,
+            customMessage,
+            scheduledAt,
+            scheduledWindow,
+            scheduledWindowPreset,
+          });
+
+          const emailResult = await sendJobScheduleToClient({
+            to: customerEmail,
+            subject,
+            data: {
+              jobUUID: fullJob.uuid,
+              customerName,
+              customerEmail,
+              address: fullJob?.job_address,
+              services: fullJob?.services || [],
+              scheduledAt,
+              scheduledWindowMins: scheduledWindow,
+              scheduledWindowPreset,
+              customMessage,
+              notificationType,
+              dashboardLink: `${process.env.CLIENT_URL}/jobs/${fullJob.uuid}/view`,
+            },
+          });
+
+          console.log("sendJobScheduleToClient result:", emailResult);
+
+          const sentMarker = await Job.markClientScheduleMessageSent(uuid);
+          console.log("sentMarker:", sentMarker);
+
+          emailSent = true;
+        } catch (err) {
+          console.error("Failed to send schedule email:", err);
+          emailError = err?.message || "Failed to send schedule email";
+        }
+      } else {
+        console.error("No customer email found for this job");
+        emailError = "No customer email found for this job";
+      }
+    } else {
+      console.log("Schedule email not requested");
+    }
+
+    fullJob = await Job.findDetailedByUUID(uuid);
+
+    console.log(
+      "fullJob?.client_schedule_message after refresh:",
+      fullJob?.client_schedule_message
+    );
+    console.log(
+      "fullJob?.client_schedule_message_sent_at after refresh:",
+      fullJob?.client_schedule_message_sent_at
+    );
+
     return res.json({
       success: true,
       job: fullJob,
       recurrence: updatedRecurrence,
+      emailSent,
+      emailError,
+      notificationType,
     });
   } catch (error) {
     console.error("updateJobSchedule error:", error);
 
     try {
-      if (jobUpdated && previousJob) {
-        await Job.updateScheduleByUUID(uuid, previousJob);
+      if (createdChangeLog?.id) {
+        await ChangeLog.deleteById(createdChangeLog.id);
+      }
+
+      if (regeneratedRecurrences) {
+        await JobRecurrence.replaceFutureForJob(uuid, previousFutureRecurrences);
       }
 
       if (recurrenceUpdated && previousRecurrence) {
@@ -620,6 +758,10 @@ export const updateJobSchedule = async (req, res) => {
           previousRecurrence.id,
           previousRecurrence
         );
+      }
+
+      if (jobUpdated && previousJob) {
+        await Job.updateScheduleByUUID(uuid, previousJob);
       }
 
       console.warn("Rollback successful");
@@ -676,7 +818,7 @@ export const getJobDetailedByUUID = async (req, res) => {
       return res.status(400).json({ error: "Invalid job UUID" });
     }
     const job = await Job.findDetailedByUUID(uuid);
-
+    console.log({job})
     if (!job) {
       return res.status(404).json({ error: "Job not found" });
     }

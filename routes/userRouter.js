@@ -25,7 +25,7 @@ import {
     getUserByEmail,
     checkCookiesExists,
     createUserEmptyEmployee,
-    getUserByAuthUserId
+    getUserByAuthUserId,
 
 } from '../controllers/userController.js';
 
@@ -37,6 +37,7 @@ router.get('/test', requireAuth, (req, res) => {
 
 router.get('/all', getUsers);
 router.get('/auth/me', requireAuth, authenticatedRateLimit, requireRole(["admin","owner", "employee", "customer"]), getCurrentUser);
+
 // router.get('/auth/check', requireAuth, checkCookiesExists);
 router.get('/auth/check', checkCookiesExists);
 router.post('/auth/login', authRateLimit, login);
