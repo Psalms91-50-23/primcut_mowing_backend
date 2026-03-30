@@ -57,13 +57,10 @@ export const requestPasswordReset = async (req, res) => {
   try {
     // Verify reCAPTCHA
     const isHuman = await verifyRecaptcha(recaptchaToken, recaptchaVersion);
-    console.log({ isHuman });
 
     if (!isHuman) {
       return res.status(400).json({ error: "Failed reCAPTCHA verification" });
     }
-
-    console.log("passed is human check");
 
     // 1. Find user by email using User model
     const userData = await User.findByEmail(email);
@@ -144,8 +141,6 @@ export const resetPassword = async (req, res) => {
       });
 
     if (updateError) throw updateError;
-
-    console.log({ updatedUser });
 
     // 3. Mark token as used
     await PasswordResetToken.markUsed(tokenData.id);

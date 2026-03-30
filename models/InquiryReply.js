@@ -27,7 +27,7 @@ export default class InquiryReply {
           sent_at,
         },
       ])
-      .select()
+      .select("*")
       .single();
 
     if (error) throw error;
@@ -39,10 +39,10 @@ export default class InquiryReply {
       .from("inquiry_replies")
       .select("*")
       .eq("uuid", uuid)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
-    return data;
+    return data || null;
   }
 
   static async findByInquiryUUID(inquiry_uuid) {

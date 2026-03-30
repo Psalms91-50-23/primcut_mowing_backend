@@ -31,7 +31,7 @@ export default class Inquiry {
           status,
         },
       ])
-      .select()
+      .select("*")
       .single();
 
     if (error) throw error;
@@ -39,19 +39,31 @@ export default class Inquiry {
   }
 
   static async findByUUID(uuid) {
+
     const { data, error } = await supabase
       .from("inquiries")
       .select("*")
       .eq("uuid", uuid)
-      .single();
+      .maybeSingle();
 
-    if (error) {
-      if (error.code === "PGRST116") return null;
-      throw error;
-    }
-
-    return data;
+    if (error) throw error;
+    return data || null;
   }
+
+  // static async findByUUID(uuid) {
+  //   const { data, error } = await supabase
+  //     .from("inquiries")
+  //     .select("*")
+  //     .eq("uuid", uuid)
+  //     .single();
+
+  //   if (error) {
+  //     if (error.code === "PGRST116") return null;
+  //     throw error;
+  //   }
+
+  //   return data;
+  // }
 
   static async getAll() {
     const { data, error } = await supabase
@@ -110,16 +122,28 @@ export default class Inquiry {
     return data;
   }
 
+  // static async updateByUUID(uuid, updates) {
+  //   const { data, error } = await supabase
+  //     .from("inquiries")
+  //     .update(updates)
+  //     .eq("uuid", uuid)
+  //     .select("*")
+  //     .single();
+
+  //   if (error) throw error;
+  //   return data;
+  // }
+
   static async updateByUUID(uuid, updates) {
     const { data, error } = await supabase
       .from("inquiries")
       .update(updates)
       .eq("uuid", uuid)
-      .select()
-      .single();
+      .select("*")
+      .maybeSingle();
 
     if (error) throw error;
-    return data;
+    return data || null;
   }
 
   static async deleteByUUID(uuid) {
