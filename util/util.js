@@ -254,6 +254,7 @@ export const formatFullName = (
   lastName,
   singleName = false
 ) => {
+
   const capitalize = (str) =>
     str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : "";
 
@@ -1100,20 +1101,82 @@ export const formatNZDate = (dateString) => {
 
   return `${day}/${month}/${year} ${hours}:${minutes}`;
 };
-// Header
-// ------------------------------------------------
-// Document Meta
 
-// Client Block
-// ------------------------------------------------
-// Service Address Block
+function escapeLike(value) {
+  return String(value ?? "")
+    .replace(/[%_]/g, "")   // prevent wildcard breaking
+    .replace(/,/g, "")      // keep your comma removal
+    .trim();
+}
 
-// Scope Block
-// ------------------------------------------------
-// Pricing Table Style Block
+export function buildSearchOr(terms, columns) {
+  const filters = [];
 
-// Status Block
-// ------------------------------------------------
-// Notes Block
+  for (const rawTerm of terms) {
+    const term = escapeLike(rawTerm);
+    if (!term) continue;
 
-// Footer
+    for (const column of columns) {
+      filters.push(`${column}.ilike.%${term}%`);
+    }
+  }
+
+  return filters.join(",");
+}
+// export const buildSearchOr = (terms, columns) => {
+//   const filters = [];
+
+//   for (const rawTerm of terms) {
+//     const term = String(rawTerm || "").trim().replace(/,/g, "");
+//     if (!term) continue;
+
+//     for (const column of columns) {
+//       filters.push(`${column}.ilike.%${term}%`);
+//     }
+//   }
+
+//   return filters.join(",");
+// }
+
+export const clampInt = (n, fallback, min, max) => {
+  const x = parseInt(String(n), 10);
+  if (Number.isNaN(x)) return fallback;
+  return Math.min(Math.max(x, min), max);
+}
+
+export const toNZDateStringFromISO = (value) => {
+  if (!value) return null;
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Pacific/Auckland",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+
+  if (!year || !month || !day) return null;
+
+  return `${year}-${month}-${day}`;
+}
+
+export const isPlainDateString = (value) => {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+};
+
+export const localDateToISO = (localDate) => {
+  if (!localDate || !isPlainDateString(localDate)) return null;
+  return new Date(`${localDate}T00:00:00`).toISOString();
+};
+
+export const formatMoney = (value) =>
+  Number(value || 0).toLocaleString("en-NZ", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });

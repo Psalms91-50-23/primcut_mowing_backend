@@ -1,60 +1,103 @@
 import supabase from '../config/db.js';
 import { normalizeNZPhone, generatePrefixedId, obfuscatePhoneNumber, obfuscateName, obfuscateEmail, obfuscateAddress } from "../util/util.js";
 import crypto from "crypto";
+import { buildSearchOr, clampInt } from '../util/util.js';
 
-function clampInt(n, fallback, min, max) {
-  const x = parseInt(String(n), 10);
-  if (Number.isNaN(x)) return fallback;
-  return Math.min(Math.max(x, min), max);
-}
+// function clampInt(n, fallback, min, max) {
+//   const x = parseInt(String(n), 10);
+//   if (Number.isNaN(x)) return fallback;
+//   return Math.min(Math.max(x, min), max);
+// }
 
-function buildSearchOr(terms, columns) {
-  const filters = [];
+// function buildSearchOr(terms, columns) {
+//   const filters = [];
 
-  for (const rawTerm of terms) {
-    const term = String(rawTerm || "").trim().replace(/,/g, "");
-    if (!term) continue;
+//   for (const rawTerm of terms) {
+//     const term = String(rawTerm || "").trim().replace(/,/g, "");
+//     if (!term) continue;
 
-    for (const column of columns) {
-      filters.push(`${column}.ilike.%${term}%`);
-    }
-  }
+//     for (const column of columns) {
+//       filters.push(`${column}.ilike.%${term}%`);
+//     }
+//   }
 
-  return filters.join(",");
-}
+//   return filters.join(",");
+// }
 
 export default class Job {
 
-  static async findByCustomerUUID(customerUuid) {
+  // static async findJobByCustomerUUID(customerUuid) {
+  //   if (!customerUuid) return [];
+
+  //   const { data, error } = await supabase
+  //     .from("jobs")
+  //     .select(`
+  //       uuid,
+  //       customer_uuid,
+  //       status,
+  //       notes,
+  //       address,
+  //       scheduled_date,
+  //       scheduled_start,
+  //       total_amount,
+  //       created_at,
+  //       updated_at,
+  //       deleted_at,
+  //       quote_uuid,
+  //       services
+  //     `)
+  //     .eq("customer_uuid", customerUuid)
+  //     .is("deleted_at", null)
+  //     .order("scheduled_date", { ascending: false, nullsFirst: false })
+  //     .order("created_at", { ascending: false });
+
+  //   if (error) {
+  //     throw error;
+  //   }
+
+  //   return data || [];
+  // }
+  static async findJobByCustomerUUID(customerUuid) {
     if (!customerUuid) return [];
 
     const { data, error } = await supabase
       .from("jobs")
-      .select(`
-        uuid,
-        customer_uuid,
-        status,
-        title,
-        description,
-        address,
-        scheduled_date,
-        scheduled_start,
-        scheduled_end,
-        total_amount,
-        created_at,
-        updated_at,
-        deleted_at
-      `)
+      .select(`*`)
       .eq("customer_uuid", customerUuid)
+      .eq("is_deleted", false)
       .is("deleted_at", null)
-      .order("scheduled_date", { ascending: false, nullsFirst: false })
+      .order("scheduled_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
 
-    if (error) {
-      throw error;
+    if (error) throw error;
+
+    const jobs = data || [];
+    if (!jobs.length) return [];
+
+    const jobUuids = jobs.map((job) => job.uuid);
+
+    const { data: recurrences, error: recurrenceError } = await supabase
+      .from("job_recurrences")
+      .select(`*`)
+      .in("job_uuid", jobUuids)
+      .eq("is_deleted", false)
+      .order("scheduled_at", { ascending: true });
+
+    if (recurrenceError) throw recurrenceError;
+
+    const recurrenceMap = new Map();
+
+    for (const recurrence of recurrences || []) {
+      if (!recurrenceMap.has(recurrence.job_uuid)) {
+        recurrenceMap.set(recurrence.job_uuid, []);
+      }
+      recurrenceMap.get(recurrence.job_uuid).push(recurrence);
     }
 
-    return data || [];
+    return jobs.map((job) => ({
+      ...job,
+      job_recurrences: recurrenceMap.get(job.uuid) || [],
+    }));
   }
 
   static async countActiveJobs() {
@@ -201,66 +244,371 @@ export default class Job {
     return data;
   }
 
-  static async searchSummary(query, limit = 10) {
-    const terms = String(query || "")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
+  // static async searchSummary(query, limit = 10) {
+  //   const terms = String(query || "")
+  //     .trim()
+  //     .split(/\s+/)
+  //     .filter(Boolean);
 
-    if (terms.length === 0) return [];
+  //   if (terms.length === 0) return [];
 
-    const orFilter = buildSearchOr(terms, [
-      "uuid",
-      // "status",
-      "job_address",
-    ]);
+  //   const orFilter = buildSearchOr(terms, [
+  //     "uuid",
+  //     // "status",
+  //     "job_address",
+  //   ]);
 
-    const { data, error } = await supabase
-    .from("jobs")
-    .select(`
+  //   const { data, error } = await supabase
+  //   .from("jobs")
+  //   .select(`
+  //       uuid,
+  //       status,
+  //       job_address,
+  //       scheduled_at,
+  //       total_amount,
+  //       created_at,
+  //       quote:quotes (
+  //         uuid,
+  //         contact_first_name,
+  //         contact_last_name,
+  //         contact_email
+  //       )
+  //     `)
+  //     .or(orFilter)
+  //     .order("created_at", { ascending: false })
+  //     .limit(limit);
+
+  //   if (error) throw error;
+
+  //   const jobs = data || [];
+
+  //   const loweredTerms = terms.map((t) => t.toLowerCase());
+
+  //   const filtered = jobs.filter((job) => {
+  //     const quote = job.quote || {};
+  //     const haystack = [
+  //       job.uuid,
+  //       // job.status,
+  //       job.job_address,
+  //       quote.uuid,
+  //       quote.contact_first_name,
+  //       quote.contact_last_name,
+  //       quote.contact_email,
+  //     ]
+  //       .filter(Boolean)
+  //       .join(" ")
+  //       .toLowerCase();
+
+  //     return loweredTerms.some((term) => haystack.includes(term));
+  //   });
+
+  //   return filtered.slice(0, limit);
+  // }
+
+  // static async searchSummary(query, limit = 10) {
+  //   const terms = String(query || "")
+  //     .trim()
+  //     .split(/\s+/)
+  //     .filter(Boolean);
+
+  //   if (terms.length === 0) return [];
+
+  //   // A) direct jobs
+  //   const jobOrFilter = buildSearchOr(terms, [
+  //     "uuid",
+  //     "job_address",
+  //   ]);
+
+  //   const { data: directJobs, error: directJobsError } = await supabase
+  //     .from("jobs")
+  //     .select(`
+  //       uuid,
+  //       customer_uuid,
+  //       quote_uuid,
+  //       status,
+  //       job_address,
+  //       scheduled_at,
+  //       total_amount,
+  //       created_at
+  //     `)
+  //     .or(jobOrFilter)
+  //     .order("created_at", { ascending: false })
+  //     .limit(limit * 2);
+
+  //   if (directJobsError) throw directJobsError;
+
+  //   // B) find matching quotes
+  //   const quoteOrFilter = buildSearchOr(terms, [
+  //     "uuid",
+  //     "contact_first_name",
+  //     "contact_last_name",
+  //     "contact_email",
+  //     "contact_mobile",
+  //     "contact_landline",
+  //     "address",
+  //   ]);
+
+  //   const { data: matchingQuotes, error: matchingQuotesError } = await supabase
+  //     .from("quotes")
+  //     .select("uuid")
+  //     .or(quoteOrFilter)
+  //     .limit(limit * 5);
+
+  //   if (matchingQuotesError) throw matchingQuotesError;
+
+  //   const quoteUUIDs = [
+  //     ...new Set((matchingQuotes || []).map((q) => q.uuid).filter(Boolean)),
+  //   ];
+
+  //   // C) fetch jobs by quote_uuid
+  //   let quoteJobs = [];
+  //   if (quoteUUIDs.length > 0) {
+  //     const { data, error } = await supabase
+  //       .from("jobs")
+  //       .select(`
+  //         uuid,
+  //         customer_uuid,
+  //         quote_uuid,
+  //         status,
+  //         job_address,
+  //         scheduled_at,
+  //         total_amount,
+  //         created_at
+  //       `)
+  //       .in("quote_uuid", quoteUUIDs)
+  //       .order("created_at", { ascending: false })
+  //       .limit(limit * 2);
+
+  //     if (error) throw error;
+  //     quoteJobs = data || [];
+  //   }
+
+  //   // D) find matching customers
+  //   const customerOrFilter = buildSearchOr(terms, [
+  //     "uuid",
+  //     "first_name",
+  //     "last_name",
+  //     "email",
+  //     "mobile_phone",
+  //     "landline_phone",
+  //     "address",
+  //   ]);
+
+  //   const { data: matchingCustomers, error: matchingCustomersError } = await supabase
+  //     .from("customers")
+  //     .select("uuid")
+  //     .or(customerOrFilter)
+  //     .limit(limit * 5);
+
+  //   if (matchingCustomersError) throw matchingCustomersError;
+
+  //   const customerUUIDs = [
+  //     ...new Set((matchingCustomers || []).map((c) => c.uuid).filter(Boolean)),
+  //   ];
+
+  //   // E) fetch jobs by customer_uuid
+  //   let customerJobs = [];
+  //   if (customerUUIDs.length > 0) {
+  //     const { data, error } = await supabase
+  //       .from("jobs")
+  //       .select(`
+  //         uuid,
+  //         customer_uuid,
+  //         quote_uuid,
+  //         status,
+  //         job_address,
+  //         scheduled_at,
+  //         total_amount,
+  //         created_at
+  //       `)
+  //       .in("customer_uuid", customerUUIDs)
+  //       .order("created_at", { ascending: false })
+  //       .limit(limit * 2);
+
+  //     if (error) throw error;
+  //     customerJobs = data || [];
+  //   }
+
+  //   // F) merge and dedupe
+  //   const mergedMap = new Map();
+
+  //   [...(directJobs || []), ...quoteJobs, ...customerJobs].forEach((job) => {
+  //     if (job?.uuid) mergedMap.set(job.uuid, job);
+  //   });
+
+  //   return Array.from(mergedMap.values()).slice(0, limit);
+  // }
+    static async searchSummary(query, limit = 10) {
+      const terms = String(query || "")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+      if (terms.length === 0) return [];
+
+      const loweredTerms = terms.map((t) => t.toLowerCase());
+
+      const baseSelect = `
         uuid,
+        customer_uuid,
+        quote_uuid,
         status,
         job_address,
         scheduled_at,
         total_amount,
         created_at,
-        quote:quotes (
+        customer:customers!jobs_customer_fk (
+          uuid,
+          first_name,
+          last_name,
+          email,
+          mobile_phone,
+          landline_phone,
+          address
+        ),
+        quote:quotes!jobs_quote_fk (
           uuid,
           contact_first_name,
           contact_last_name,
-          contact_email
+          contact_email,
+          contact_mobile,
+          contact_landline,
+          address
         )
-      `)
-      .or(orFilter)
-      .order("created_at", { ascending: false })
-      .limit(limit);
+      `;
 
-    if (error) throw error;
+      // A) direct jobs
+      const jobOrFilter = buildSearchOr(terms, [
+        "uuid",
+        "job_address",
+        // "status",
+        "notes",
+      ]);
 
-    const jobs = data || [];
+      const { data: directJobs, error: directJobsError } = await supabase
+        .from("jobs")
+        .select(baseSelect)
+        .or(jobOrFilter)
+        .order("created_at", { ascending: false })
+        .limit(limit * 2);
 
-    const loweredTerms = terms.map((t) => t.toLowerCase());
+      if (directJobsError) throw directJobsError;
 
-    const filtered = jobs.filter((job) => {
-      const quote = job.quote || {};
-      const haystack = [
-        job.uuid,
-        // job.status,
-        job.job_address,
-        quote.uuid,
-        quote.contact_first_name,
-        quote.contact_last_name,
-        quote.contact_email,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+      // B) matching quotes
+      const quoteOrFilter = buildSearchOr(terms, [
+        "uuid",
+        "contact_first_name",
+        "contact_last_name",
+        "contact_email",
+        "contact_mobile",
+        "contact_landline",
+        "address",
+      ]);
 
-      return loweredTerms.some((term) => haystack.includes(term));
-    });
+      const { data: matchingQuotes, error: matchingQuotesError } = await supabase
+        .from("quotes")
+        .select("uuid")
+        .or(quoteOrFilter)
+        .limit(limit * 5);
 
-    return filtered.slice(0, limit);
+      if (matchingQuotesError) throw matchingQuotesError;
+
+      const quoteUUIDs = [
+        ...new Set((matchingQuotes || []).map((q) => q.uuid).filter(Boolean)),
+      ];
+
+      let quoteJobs = [];
+      if (quoteUUIDs.length > 0) {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select(baseSelect)
+          .in("quote_uuid", quoteUUIDs)
+          .order("created_at", { ascending: false })
+          .limit(limit * 2);
+
+        if (error) throw error;
+        quoteJobs = data || [];
+      }
+
+      // C) matching customers
+      const customerOrFilter = buildSearchOr(terms, [
+        "uuid",
+        "first_name",
+        "last_name",
+        "email",
+        "mobile_phone",
+        "landline_phone",
+        "address",
+      ]);
+
+      const { data: matchingCustomers, error: matchingCustomersError } = await supabase
+        .from("customers")
+        .select("uuid")
+        .or(customerOrFilter)
+        .limit(limit * 5);
+
+      if (matchingCustomersError) throw matchingCustomersError;
+
+      const customerUUIDs = [
+        ...new Set((matchingCustomers || []).map((c) => c.uuid).filter(Boolean)),
+      ];
+
+      let customerJobs = [];
+      if (customerUUIDs.length > 0) {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select(baseSelect)
+          .in("customer_uuid", customerUUIDs)
+          .order("created_at", { ascending: false })
+          .limit(limit * 2);
+
+        if (error) throw error;
+        customerJobs = data || [];
+      }
+
+      // D) merge + dedupe
+      const mergedMap = new Map();
+
+      [...(directJobs || []), ...quoteJobs, ...customerJobs].forEach((job) => {
+        if (job?.uuid) mergedMap.set(job.uuid, job);
+      });
+
+      const merged = Array.from(mergedMap.values());
+
+      // E) final relevance filter
+      const filtered = merged.filter((job) => {
+        const customer = job.customer || {};
+        const quote = job.quote || {};
+
+        const haystack = [
+          job.uuid,
+          job.status,
+          job.job_address,
+          customer.uuid,
+          customer.first_name,
+          customer.last_name,
+          customer.email,
+          customer.mobile_phone,
+          customer.landline_phone,
+          customer.address,
+          quote.uuid,
+          quote.contact_first_name,
+          quote.contact_last_name,
+          quote.contact_email,
+          quote.contact_mobile,
+          quote.contact_landline,
+          quote.address,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return loweredTerms.every((term) => haystack.includes(term));
+      });
+
+      return filtered.slice(0, limit);
   }
+
   // Get all jobs
   static async findAll() {
     const { data, error } = await supabase
@@ -296,7 +644,6 @@ export default class Job {
       job_recurrences: (data.job_recurrences || []).filter((r) => r.is_deleted === false),
     };
   }
-
 
   static async updateScheduleByUUID(uuid, updates = {}) {
     if (!uuid) {

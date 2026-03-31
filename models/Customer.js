@@ -1,19 +1,6 @@
 import supabase from '../config/db.js';
 import { getQuotePdfPublicUrl } from '../util/getQuotePdfPublicUrl.js';
-function buildSearchOr(terms, columns) {
-  const filters = [];
-
-  for (const rawTerm of terms) {
-    const term = String(rawTerm || "").trim().replace(/,/g, "");
-    if (!term) continue;
-
-    for (const column of columns) {
-      filters.push(`${column}.ilike.%${term}%`);
-    }
-  }
-
-  return filters.join(",");
-}
+import { buildSearchOr } from '../util/util.js';
 
 export default class Customer {
 

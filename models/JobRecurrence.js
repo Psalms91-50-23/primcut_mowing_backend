@@ -484,6 +484,50 @@ class JobRecurrence {
 
     return data;
   }
+
+  static async findFutureByJobUUID(jobUUID) {
+    if (!jobUUID) {
+      throw new Error("jobUUID is required");
+    }
+
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("job_recurrences")
+      .select("*")
+      .eq("job_uuid", jobUUID)
+      .eq("is_completed", false)
+      .gte("scheduled_at", now)
+      .order("scheduled_at", { ascending: true });
+
+    if (error) {
+      throw new Error(`Error fetching future recurrences: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  static async deleteFutureByJobUUID(jobUUID) {
+    if (!jobUUID) {
+      throw new Error("jobUUID is required");
+    }
+
+    const now = new Date().toISOString();
+
+    // Only delete FUTURE + NOT completed recurrences
+    const { data, error } = await supabase
+      .from("job_recurrences")
+      .delete()
+      .eq("job_uuid", jobUUID)
+      .eq("is_completed", false)
+      .gte("scheduled_at", now);
+
+    if (error) {
+      throw new Error(`Error deleting future recurrences: ${error.message}`);
+    }
+
+    return data || [];
+  }
 }
 
 export default JobRecurrence;

@@ -1,19 +1,20 @@
 import supabase from "../config/db.js";
+import { buildSearchOr } from '../util/util.js';
 
-function buildSearchOr(terms, columns) {
-  const filters = [];
+// function buildSearchOr(terms, columns) {
+//   const filters = [];
 
-  for (const rawTerm of terms) {
-    const term = String(rawTerm || "").trim().replace(/,/g, "");
-    if (!term) continue;
+//   for (const rawTerm of terms) {
+//     const term = String(rawTerm || "").trim().replace(/,/g, "");
+//     if (!term) continue;
 
-    for (const column of columns) {
-      filters.push(`${column}.ilike.%${term}%`);
-    }
-  }
+//     for (const column of columns) {
+//       filters.push(`${column}.ilike.%${term}%`);
+//     }
+//   }
 
-  return filters.join(",");
-}
+//   return filters.join(",");
+// }
 
 export default class Quote {
 
@@ -77,6 +78,7 @@ export default class Quote {
         "contact_mobile",
         "contact_landline",
         "address",
+        "customer_uuid"
         // "status",
         ]);
 
@@ -92,7 +94,8 @@ export default class Quote {
             contact_landline,
             address,
             total_amount,
-            created_at
+            created_at,
+            customer_uuid
         `)
         .or(orFilter)
         .order("created_at", { ascending: false })

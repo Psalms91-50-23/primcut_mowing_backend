@@ -193,20 +193,20 @@ export const getQuoteById = async (req, res) => {
 };
 
 export const getQuotesByCustomerUUID = async (req, res) => {
-  const { customerUuid } = req.params;
+  const { uuid } = req.params;
   const actorUserUuid = req.user?.uuid || null;
 
-  if (!customerUuid) {
+  if (!uuid) {
     return res.status(400).json({ error: "Customer UUID is required" });
   }
 
   try {
-    const quotes = await Quote.findByCustomerUUID(customerUuid);
+    const quotes = await Quote.findByCustomerUUID(uuid);
 
     return res.status(200).json({
       quotes,
       count: quotes.length,
-      customer_uuid: customerUuid,
+      customer_uuid: uuid,
       actor_user_uuid: actorUserUuid,
     });
   } catch (error) {
@@ -665,7 +665,6 @@ export const getQuoteByUUID = async (req, res) => {
 
 // Update by UUID
 
-
 export const createQuote = async (req, res) => {
   let newQuote = null;
   let quoteAccessToken = null;
@@ -1008,11 +1007,11 @@ export const createQuote = async (req, res) => {
     };
 
     newQuote = await Quote.create(newQuoteData);
-
+    console.log({newQuote})
     if (!newQuote) {
       throw new Error("Failed to create quote");
     }
-
+    
     await createChangeLogSafe({
       table_name: "quotes",
       record_uuid: newQuote.uuid,
@@ -1251,6 +1250,403 @@ export const updateQuoteByUUID = async (req, res) => {
   }
 };
 
+// export const updateQuoteByUUIDEmployee = async (req, res) => {
+//   const { uuid } = req.params;
+
+//   if (!uuid) {
+//     return res.status(400).json({ message: "Quote uuid is required" });
+//   }
+
+//   const actorUserUuid = req.user?.uuid || null;
+//   console.log({ actorUserUuid });
+
+//   let existingQuote;
+//   let quoteSnapshot = null;
+//   let filePath = null;
+
+//   try {
+//     existingQuote = await Quote.findByUUID(uuid);
+
+//     if (!existingQuote) {
+//       return res.status(404).json({
+//         message: `Quote not found with uuid: ${uuid}`,
+//       });
+//     }
+
+//     quoteSnapshot = JSON.parse(JSON.stringify(existingQuote));
+
+//     if (existingQuote.status !== "draft") {
+//       return res.status(400).json({
+//         message: "Quote cannot be dispatched in current state",
+//       });
+//     }
+
+//     if (existingQuote.is_quote_sent_to_client) {
+//       return res.status(400).json({
+//         message: "Quote has already been sent to client",
+//       });
+//     }
+
+//     const {
+//       services,
+//       subtotal_amount,
+//       gst_amount,
+//       total_amount,
+//       preferred_contact_method,
+//       contact_first_name,
+//       contact_last_name,
+//       contact_mobile,
+//       contact_landline,
+//       expiry_end,
+//       sent_by_user_uuid,
+//       employer_message,
+//       has_urgent_fee,
+//       urgent_fee_amount,
+//     } = req.body;
+
+//     const allowedContact = ["mobile", "landline", "email"];
+
+//     if (
+//       preferred_contact_method &&
+//       !allowedContact.includes(preferred_contact_method)
+//     ) {
+//       return res.status(400).json({
+//         message: "Invalid preferred contact method",
+//       });
+//     }
+
+//     if (!Array.isArray(services) || services.length === 0) {
+//       return res.status(400).json({
+//         message: "Services must be a non-empty array",
+//       });
+//     }
+
+//     for (const s of services) {
+//       if (typeof s.unit_price !== "number" || s.unit_price < 0) {
+//         return res.status(400).json({
+//           message: "Unit price must be a positive number",
+//         });
+//       }
+
+//       if (typeof s.quantity !== "number" || s.quantity <= 0) {
+//         return res.status(400).json({
+//           message: "Quantity must be greater than zero",
+//         });
+//       }
+//     }
+
+//     const servicesSubtotal = parseFloat(
+//       services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0).toFixed(2)
+//     );
+
+//     const safeHasUrgentFee = Boolean(has_urgent_fee);
+//     const safeUrgentFee = safeHasUrgentFee
+//       ? parseFloat(Number(urgent_fee_amount ?? 0).toFixed(2))
+//       : 0;
+
+//     if (safeUrgentFee < 0) {
+//       return res.status(400).json({
+//         message: "Urgent fee must be zero or greater",
+//       });
+//     }
+
+//     const calcSubtotal = parseFloat((servicesSubtotal + safeUrgentFee).toFixed(2));
+//     const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+//     const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+//     if (parseFloat(Number(subtotal_amount).toFixed(2)) !== calcSubtotal) {
+//       return res.status(400).json({
+//         message: "Subtotal mismatch",
+//         expected: calcSubtotal,
+//         received: subtotal_amount,
+//       });
+//     }
+
+//     if (parseFloat(Number(gst_amount).toFixed(2)) !== calcGST) {
+//       return res.status(400).json({
+//         message: "GST mismatch",
+//         expected: calcGST,
+//         received: gst_amount,
+//       });
+//     }
+
+//     if (parseFloat(Number(total_amount).toFixed(2)) !== calcTotal) {
+//       return res.status(400).json({
+//         message: "Total mismatch",
+//         expected: calcTotal,
+//         received: total_amount,
+//       });
+//     }
+
+//     const sentAt = new Date();
+
+//     const exactMinExpiryDate = new Date(
+//       sentAt.getTime() + MIN_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+//     );
+
+//     const allowCustomFromDate = new Date(
+//       sentAt.getTime() + (MIN_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000
+//     );
+
+//     let expiry_end_date;
+
+//     if (expiry_end) {
+//       if (
+//         typeof expiry_end === "string" &&
+//         /^\d{4}-\d{2}-\d{2}$/.test(expiry_end)
+//       ) {
+//         const [year, month, day] = expiry_end.split("-").map(Number);
+
+//         expiry_end_date = new Date(sentAt);
+//         expiry_end_date.setFullYear(year, month - 1, day);
+//       } else {
+//         expiry_end_date = new Date(expiry_end);
+//       }
+//     } else {
+//       expiry_end_date = new Date(exactMinExpiryDate);
+//     }
+
+//     if (Number.isNaN(expiry_end_date.getTime())) {
+//       return res.status(400).json({
+//         message: "Invalid expiry date",
+//       });
+//     }
+
+//     if (expiry_end_date < allowCustomFromDate) {
+//       expiry_end_date = new Date(exactMinExpiryDate);
+//     }
+
+//     const quoteSentAt = sentAt.toISOString();
+
+//     const activeTerms = await TermsAndConditions.findActive();
+
+//     if (!activeTerms) {
+//       return res.status(400).json({
+//         message: "No active terms and conditions found",
+//       });
+//     }
+
+//     if (!activeTerms.pdf_storage_path) {
+//       return res.status(400).json({
+//         message: "Active terms and conditions PDF is missing",
+//       });
+//     }
+
+//     const updatePayload = {
+//       services,
+//       subtotal_amount: calcSubtotal,
+//       gst_amount: calcGST,
+//       total_amount: calcTotal,
+//       has_urgent_fee: safeHasUrgentFee,
+//       urgent_fee_amount: safeUrgentFee,
+//       expiry_end: expiry_end_date.toISOString(),
+//       status: "sent",
+//       is_quote_sent_to_client: true,
+//       quote_sent_at: quoteSentAt,
+//       sent_by_user_uuid: sent_by_user_uuid ?? null,
+//       preferred_contact_method,
+//       contact_mobile,
+//       contact_landline,
+//       contact_first_name,
+//       contact_last_name,
+//       employer_message: employer_message ?? "",
+//       quote_version_reason: "employee_sent",
+//       terms_uuid: activeTerms.uuid,
+//       terms_version: activeTerms.version,
+//       terms_pdf_url: activeTerms.pdf_url ?? null,
+//     };
+
+//     let logoBuffer = null;
+
+//     try {
+//       const logoPath = path.join(process.cwd(), "assets", "happy-house-header.png");
+//       logoBuffer = fs.readFileSync(logoPath);
+//     } catch (err) {
+//       console.error("Logo load failed:", err.message);
+//     }
+
+//     const pdfBuffer = await generateQuotePDF(
+//       {
+//         ...existingQuote,
+//         ...updatePayload,
+//       },
+//       null,
+//       logoBuffer
+//     );
+
+//     const result = await Quote.dispatchQuote(uuid, { ...updatePayload }, pdfBuffer);
+//     const finalQuote = result.updated;
+//     filePath = result.filePath;
+
+//     const recipientEmail = finalQuote.contact_email?.trim().toLowerCase();
+
+//     if (!recipientEmail) {
+//       return res.status(400).json({
+//         message: "Contact email is required",
+//       });
+//     }
+
+//     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+//     if (!emailRegex.test(recipientEmail)) {
+//       return res.status(400).json({
+//         message: "Contact email is invalid",
+//       });
+//     }
+
+//     const termsPdfBuffer = await downloadTermsPDFBuffer(activeTerms.pdf_storage_path);
+
+//     await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
+
+//     const rawToken = crypto.randomBytes(32).toString("hex");
+//     const token_hash = hashToken(rawToken);
+
+//     let tokenUUID;
+//     let exists;
+
+//     do {
+//       tokenUUID = generatePrefixedId("QT", 7);
+//       exists = await QuoteAccessToken.findByUUID(tokenUUID);
+//     } while (exists);
+
+//     await QuoteAccessToken.create({
+//       quote_uuid: finalQuote.uuid,
+//       token_hash,
+//       expires_at: new Date(finalQuote.expiry_end).toISOString(),
+//       uuid: tokenUUID,
+//     });
+
+//     const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
+
+//     await sendQuoteToClient({
+//       to: recipientEmail,
+//       subject: `Your Quote #${finalQuote.uuid} ${formatFullName(
+//         finalQuote.contact_first_name,
+//         finalQuote.contact_last_name,
+//         false
+//       )} is Ready`,
+//       data: {
+//         quoteUUID: finalQuote.uuid,
+//         name: formatFullName(
+//           finalQuote.contact_first_name,
+//           finalQuote.contact_last_name,
+//           false
+//         ),
+//         mobile: finalQuote.contact_mobile ?? "",
+//         landline: finalQuote.contact_landline ?? "",
+//         message: finalQuote.message ?? "",
+//         email: recipientEmail,
+//         subtotal: finalQuote.subtotal_amount,
+//         gst: finalQuote.gst_amount,
+//         total: finalQuote.total_amount,
+//         services: finalQuote.services,
+//         images: finalQuote.images,
+//         quoteLink,
+//         quotePdfUrl: finalQuote.quote_pdf_url ?? "",
+//         expiry: formatExpiry(finalQuote.expiry_end),
+//         employer_message: finalQuote.employer_message ?? "",
+//         has_urgent_fee: finalQuote.has_urgent_fee,
+//         urgent_fee_amount: finalQuote.urgent_fee_amount,
+//         termsVersion: activeTerms.version ?? "",
+//         termsTitle: activeTerms.title ?? "",
+//         termsUrl: activeTerms.pdf_url ?? "",
+//         termsSummary: activeTerms.short_summary ?? "",
+//       },
+//       pdfBuffer,
+//       termsPdfBuffer,
+//       termsFileName: `terms-and-conditions-${activeTerms.version}.pdf`,
+//     });
+
+//     const fieldsToTrack = [
+//       "services",
+//       "subtotal_amount",
+//       "gst_amount",
+//       "total_amount",
+//       "expiry_end",
+//       "status",
+//       "is_quote_sent_to_client",
+//       "quote_sent_at",
+//       "sent_by_user_uuid",
+//       "preferred_contact_method",
+//       "contact_mobile",
+//       "contact_landline",
+//       "contact_first_name",
+//       "contact_last_name",
+//       "employer_message",
+//       "quote_version_reason",
+//       "quote_pdf_url",
+//       "quote_pdf_storage_path",
+//       "pdf_version",
+//       "quote_pdf_version",
+//       "terms_uuid",
+//       "terms_version",
+//       "terms_pdf_url",
+//       "has_urgent_fee",
+//       "urgent_fee_amount",
+//     ];
+
+//     const changed_fields = {};
+
+//     for (const field of fieldsToTrack) {
+//       const beforeValue = quoteSnapshot?.[field] ?? null;
+//       const afterValue = finalQuote?.[field] ?? null;
+
+//       if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
+//         changed_fields[field] = {
+//           old: beforeValue,
+//           new: afterValue,
+//         };
+//       }
+//     }
+
+//     await createChangeLogSafe({
+//       table_name: "quotes",
+//       record_uuid: finalQuote.uuid,
+//       user_uuid: actorUserUuid,
+//       action: "update",
+//       summary:
+//         "Employee updated draft quote, generated PDF, attached T&C PDF, and sent quote to client",
+//       changed_fields,
+//       source: "dashboard",
+//     });
+
+//     return res.status(200).json({
+//       message: "Quote updated and sent successfully",
+//       quote: finalQuote,
+//     });
+//   } catch (error) {
+//     console.error(error);
+
+//     if (quoteSnapshot) {
+//       try {
+//         await Quote.updateByUUID(uuid, quoteSnapshot);
+//       } catch (rollbackError) {
+//         console.error("Database rollback failed:", rollbackError);
+//       }
+//     }
+
+//     try {
+//       await QuoteAccessToken.revokeAllForQuote(uuid);
+//     } catch (e) {
+//       console.error("Token rollback failed:", e);
+//     }
+
+//     if (filePath) {
+//       try {
+//         await supabase.storage.from("quotes-pdf").remove([filePath]);
+//       } catch (storageError) {
+//         console.error("Storage rollback failed:", storageError);
+//       }
+//     }
+
+//     return res.status(500).json({
+//       error: error.message || "Failed to finalize quote",
+//     });
+//   }
+// };
+
+// Update by ID
+
 export const updateQuoteByUUIDEmployee = async (req, res) => {
   const { uuid } = req.params;
 
@@ -1303,6 +1699,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       employer_message,
       has_urgent_fee,
       urgent_fee_amount,
+      recurrence_frequency,
     } = req.body;
 
     const allowedContact = ["mobile", "landline", "email"];
@@ -1315,6 +1712,19 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
         message: "Invalid preferred contact method",
       });
     }
+
+    const allowedRecurrenceFrequencies = [
+      "one_off",
+      "weekly",
+      "fortnightly",
+      "monthly",
+    ];
+
+    const normalizedRecurrenceFrequency = allowedRecurrenceFrequencies.includes(
+      recurrence_frequency
+    )
+      ? recurrence_frequency
+      : existingQuote.recurrence_frequency || "one_off";
 
     if (!Array.isArray(services) || services.length === 0) {
       return res.status(400).json({
@@ -1440,6 +1850,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       total_amount: calcTotal,
       has_urgent_fee: safeHasUrgentFee,
       urgent_fee_amount: safeUrgentFee,
+      recurrence_frequency: normalizedRecurrenceFrequency,
       expiry_end: expiry_end_date.toISOString(),
       status: "sent",
       is_quote_sent_to_client: true,
@@ -1546,6 +1957,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
         quotePdfUrl: finalQuote.quote_pdf_url ?? "",
         expiry: formatExpiry(finalQuote.expiry_end),
         employer_message: finalQuote.employer_message ?? "",
+        recurrence_frequency: finalQuote.recurrence_frequency ?? "one_off",
         has_urgent_fee: finalQuote.has_urgent_fee,
         urgent_fee_amount: finalQuote.urgent_fee_amount,
         termsVersion: activeTerms.version ?? "",
@@ -1574,6 +1986,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
       "contact_first_name",
       "contact_last_name",
       "employer_message",
+      "recurrence_frequency",
       "quote_version_reason",
       "quote_pdf_url",
       "quote_pdf_storage_path",
@@ -1646,7 +2059,6 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
   }
 };
 
-// Update by ID
 export const updateQuoteById = async (req, res) => {
   const { id } = req.params;
   const actorUserUuid = req.user?.uuid || null;
