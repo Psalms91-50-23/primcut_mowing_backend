@@ -1,5 +1,5 @@
 import TermsAndConditions from "../models/TermsAndConditions.js";
-import { generatePrefixedId } from "../util/util.js";
+import { generatePrefixedId, normalizeVersion } from "../util/util.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { generateTermsPDF } from "../util/generateTermsPDF.js";
 import { uploadTermsPDFBuffer, downloadTermsPDFBuffer, deleteTermsPDF  } from "../util/termsAndConditionsHelper.js";
@@ -246,6 +246,7 @@ async function generateUniqueTermsUUID() {
 //     });
 //   }
 // };
+
 export const createTermsAndConditions = async (req, res) => {
   let uploadedStoragePath = null;
 
@@ -398,13 +399,79 @@ export const getAllTermsAndConditions = async (_req, res) => {
 export const getActiveTermsAndConditions = async (_req, res) => {
   try {
     const active = await TermsAndConditions.findActive();
+    if (!active) {
+      return res.status(404).json({
+        error: "No active terms and conditions found",
+      });
+    }
+
+    return res.status(200).json(active);
+  } catch (error) {
+    console.error("getActiveTermsAndConditions error:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch active terms and conditions",
+    });
+  }
+};
+
+// export const getActiveTermsAndConditions = async (_req, res) => {
+//   try {
+//     console.log("pid:", process.pid);
+//     console.log("SUPABASE_URL:", process.env.SUPABASE_URL);
+//     console.log("table:", TermsAndConditions.tableName);
+
+//     // 1) Supabase JS query
+//     const active = await TermsAndConditions.findActive();
+//     console.log("supabase-js active:", active);
+
+//     // 2) Raw REST query to Supabase with the same service role key
+//     const rawUrl =
+//       `${process.env.SUPABASE_URL}/rest/v1/terms_and_conditions` +
+//       `?select=uuid,version,title,is_active,updated_at` +
+//       `&is_active=eq.true` +
+//       `&order=updated_at.desc`;
+
+//     const rawResponse = await fetch(rawUrl, {
+//       headers: {
+//         apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+//         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+//       },
+//     });
+
+//     const rawData = await rawResponse.json();
+
+//     console.log("raw status:", rawResponse.status);
+//     console.log("raw rows:", rawData);
+
+//     if (!active) {
+//       return res.status(404).json({
+//         error: "No active terms and conditions found",
+//         debug: {
+//           pid: process.pid,
+//           rawStatus: rawResponse.status,
+//           rawCount: Array.isArray(rawData) ? rawData.length : null,
+//         },
+//       });
+//     }
+
+//     return res.status(200).json(active);
+//   } catch (error) {
+//     console.error("getActiveTermsAndConditions error:", error);
+//     return res.status(500).json({
+//       error: error.message || "Failed to fetch active terms and conditions",
+//     });
+//   }
+// };
+
+export const getActiveTermsAndConditionsAdmin = async (_req, res) => {
+  try {
+    const active = await TermsAndConditions.findActive();
 
     if (!active) {
       return res.status(404).json({
         error: "No active terms and conditions found",
       });
     }
-    console.log({active});
     return res.status(200).json(active);
   } catch (error) {
     console.error("getActiveTermsAndConditions error:", error);

@@ -28,7 +28,7 @@ import {
   sendQuoteToClient,
   sendQuoteAcceptedToBusiness
 } from "../lib/email/index.js";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import { uploadImageToBucket, removeUploadedFiles, parseJSONField } from "../util/uploadHelpers.js";
 
 const QUOTE_IMAGES_BUCKET = "quote-images";
@@ -1633,7 +1633,7 @@ export const updateQuoteByUUID = async (req, res) => {
 
 //     if (filePath) {
 //       try {
-//         await supabase.storage.from("quotes-pdf").remove([filePath]);
+//         await supabase().storage.from("quotes-pdf").remove([filePath]);
 //       } catch (storageError) {
 //         console.error("Storage rollback failed:", storageError);
 //       }
@@ -2047,7 +2047,7 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
 
     if (filePath) {
       try {
-        await supabase.storage.from("quotes-pdf").remove([filePath]);
+        await supabase().storage.from("quotes-pdf").remove([filePath]);
       } catch (storageError) {
         console.error("Storage rollback failed:", storageError);
       }
@@ -3124,7 +3124,7 @@ export const deleteAllFilesFromBucket = async (req, res) => {
   try {
     const bucketName = "quote-images";
 
-    const { data: files, error: listError } = await supabase.storage
+    const { data: files, error: listError } = await supabase().storage
       .from(bucketName)
       .list("", { limit: 1000 });
 
@@ -3132,7 +3132,7 @@ export const deleteAllFilesFromBucket = async (req, res) => {
 
     const filePaths = files.map((file) => file.name);
 
-    const { error: deleteError } = await supabase.storage
+    const { error: deleteError } = await supabase().storage
       .from(bucketName)
       .remove(filePaths);
 

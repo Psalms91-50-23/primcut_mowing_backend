@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 class QuoteTermsAcceptance {
 
@@ -35,7 +35,7 @@ class QuoteTermsAcceptance {
       throw new Error("version is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .insert([acceptance])
       .select("*")
@@ -55,7 +55,7 @@ class QuoteTermsAcceptance {
       throw new Error("Acceptance uuid is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .select("*")
       .eq("uuid", uuid)
@@ -75,7 +75,7 @@ class QuoteTermsAcceptance {
       throw new Error("Quote uuid is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .select("*")
       .eq("quote_uuid", quoteUUID)
@@ -95,7 +95,7 @@ class QuoteTermsAcceptance {
       throw new Error("Quote uuid is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .select("*")
       .eq("quote_uuid", quoteUUID)
@@ -121,7 +121,7 @@ class QuoteTermsAcceptance {
       throw new Error("Version is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .select("uuid")
       .eq("quote_uuid", quoteUUID)
@@ -147,7 +147,7 @@ class QuoteTermsAcceptance {
       throw new Error("Version is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("quote_terms_acceptances")
       .select("*")
       .eq("quote_uuid", quoteUUID)

@@ -7,6 +7,7 @@ import {
   updateTermsAndConditions,
   setActiveTermsAndConditions,
   deleteTermsAndConditions,
+  getActiveTermsAndConditionsAdmin
 } from "../controllers/termsAndConditionsController.js";
 
 import {
@@ -20,7 +21,9 @@ import { requireRole } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // Public / customer-safe route
-router.get("/active", publicRateLimit, getActiveTermsAndConditions);
+router.get("/active", getActiveTermsAndConditions);
+// router.get("/active", getActiveTermsAndConditions);
+router.get("/active/admin", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getActiveTermsAndConditionsAdmin);
 
 // Admin / dashboard routes
 router.get("/", getAllTermsAndConditions);

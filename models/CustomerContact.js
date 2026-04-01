@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 class CustomerContact {
   static tableName = "customer_contacts";
@@ -38,7 +38,7 @@ class CustomerContact {
       updated_at: now,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .insert([payload])
       .select("*")
@@ -53,7 +53,7 @@ class CustomerContact {
         throw new Error("Customer UUID is required");
       }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("customer_contacts")
       .select("*")
       .eq("customer_uuid", customer_uuid)
@@ -68,7 +68,7 @@ class CustomerContact {
   };
 
   static async findByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("uuid", uuid)
@@ -80,7 +80,7 @@ class CustomerContact {
   }
 
   static async findAllByCustomerUUID(customer_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("customer_uuid", customer_uuid)
@@ -100,7 +100,7 @@ class CustomerContact {
       updated_at: now,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .update(payload)
       .eq("uuid", uuid)
@@ -115,7 +115,7 @@ class CustomerContact {
   static async softDeleteByUUID(uuid) {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .update({
         is_deleted: true,
@@ -132,7 +132,7 @@ class CustomerContact {
   }
 
   static async clearPrimaryForCustomer(customer_uuid, exclude_uuid = null) {
-    let query = supabase
+    let query = supabase()
       .from(this.tableName)
       .update({
         is_primary: false,

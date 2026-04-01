@@ -1,5 +1,5 @@
 // models/UserLogin.js
-import supabase from '../config/db.js'; // your supabase client
+import { supabase } from '../config/db.js'; // your supabase() client
 
 class UserLogin {
 
@@ -19,7 +19,7 @@ class UserLogin {
   static async create({ uuid, user_uuid, ip_address, user_agent, success }) {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .insert([{
         uuid,
@@ -42,7 +42,7 @@ class UserLogin {
    * @param {string} uuid
    */
   static async findByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
         .from(this.tableName)
         .select('*')
         .eq('uuid', uuid)
@@ -58,7 +58,7 @@ class UserLogin {
    * @param {number} limit
    */
   static async findRecentByUser(user_uuid, limit = 10) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select('*')
       .eq('user_uuid', user_uuid)
@@ -70,7 +70,7 @@ class UserLogin {
   }
 
   static async deleteByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .delete()
       .eq('uuid', uuid);

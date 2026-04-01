@@ -348,6 +348,7 @@ import { capitalize, formatMoney } from "../util/util.js";
 // };
 
 export const generateQuotePDF = async (quote, customer = null) => {
+  
   const headerImagePath = path.join(
     process.cwd(),
     "assets/happy-house-header.png"

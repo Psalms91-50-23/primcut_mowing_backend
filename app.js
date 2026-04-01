@@ -37,7 +37,7 @@ const app = express();
 const allowedOrigins = [
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
-  process.env.FRONTEND_URL_HAPPY_LAWNS
+  process.env.FRONTEND_URL_HAPPY_PROPERTY
 ].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i);
 
 console.log({allowedOrigins})

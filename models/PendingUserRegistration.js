@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 class PendingUserRegistration {
   static async create(payload) {
@@ -13,7 +13,7 @@ class PendingUserRegistration {
       verified_at: null,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .insert([insertPayload])
       .select()
@@ -24,7 +24,7 @@ class PendingUserRegistration {
   }
 
   static async findByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .select("*")
       .eq("uuid", uuid)
@@ -38,7 +38,7 @@ class PendingUserRegistration {
   static async findByTokenHash(tokenHash) {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .select("*")
       .eq("token_hash", tokenHash)
@@ -55,7 +55,7 @@ class PendingUserRegistration {
     const normalizedEmail = email?.trim().toLowerCase();
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .select("*")
       .eq("email", normalizedEmail)
@@ -73,7 +73,7 @@ class PendingUserRegistration {
   static async markUsed(uuid) {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .update({
         verified_at: now,
@@ -90,7 +90,7 @@ class PendingUserRegistration {
   }
 
   static async softDeleteByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .update({
         is_deleted: true,
@@ -107,7 +107,7 @@ class PendingUserRegistration {
   static async deleteExpiredUnused() {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("pending_user_registrations")
       .update({
         is_deleted: true,

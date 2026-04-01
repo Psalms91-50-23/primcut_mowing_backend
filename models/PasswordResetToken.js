@@ -1,4 +1,4 @@
-import supabase from "../config/db.js"; // your Supabase client
+import { supabase } from "../config/db.js"; // your Supabase() client
 import crypto from "crypto";
 
 export class PasswordResetToken {
@@ -10,7 +10,7 @@ export class PasswordResetToken {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("password_resets_tokens")
       .insert({
         auth_user_id: authUserId,
@@ -30,7 +30,7 @@ export class PasswordResetToken {
   static async findOneByToken(token) {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("password_resets_tokens")
       .select("*")
       .eq("token_hash", tokenHash)
@@ -48,7 +48,7 @@ export class PasswordResetToken {
 
   // Mark a token as used
   static async markUsed(id) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("password_resets_tokens")
       .update({ used_at: new Date().toISOString() })
       .eq("id", id)
@@ -61,7 +61,7 @@ export class PasswordResetToken {
 
   // Optional helper: find resets by user UUID
   static async findAllByUserUuid(userUuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("password_resets_tokens")
       .select("*")
       .eq("user_uuid", userUuid);

@@ -1,7 +1,7 @@
 import { PasswordResetToken } from "../models/PasswordResetToken.js";
 import User from "../models/User.js";
 import ChangeLog from "../models/ChangeLog.js";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import { resetPasswordLink } from "../lib/email/index.js";
 import {
   generateShortId,
@@ -134,9 +134,9 @@ export const resetPassword = async (req, res) => {
       return res.status(400).json({ error: "Token expired" });
     }
 
-    // 2. Update Supabase auth password for auth_user_id
+    // 2. Update Supabase() auth password for auth_user_id
     const { data: updatedUser, error: updateError } =
-      await supabase.auth.admin.updateUserById(tokenData.auth_user_id, {
+      await supabase().auth.admin.updateUserById(tokenData.auth_user_id, {
         password: newPassword,
       });
 

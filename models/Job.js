@@ -1,4 +1,4 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 import { normalizeNZPhone, generatePrefixedId, obfuscatePhoneNumber, obfuscateName, obfuscateEmail, obfuscateAddress } from "../util/util.js";
 import crypto from "crypto";
 import { buildSearchOr, clampInt } from '../util/util.js';
@@ -26,41 +26,10 @@ import { buildSearchOr, clampInt } from '../util/util.js';
 
 export default class Job {
 
-  // static async findJobByCustomerUUID(customerUuid) {
-  //   if (!customerUuid) return [];
-
-  //   const { data, error } = await supabase
-  //     .from("jobs")
-  //     .select(`
-  //       uuid,
-  //       customer_uuid,
-  //       status,
-  //       notes,
-  //       address,
-  //       scheduled_date,
-  //       scheduled_start,
-  //       total_amount,
-  //       created_at,
-  //       updated_at,
-  //       deleted_at,
-  //       quote_uuid,
-  //       services
-  //     `)
-  //     .eq("customer_uuid", customerUuid)
-  //     .is("deleted_at", null)
-  //     .order("scheduled_date", { ascending: false, nullsFirst: false })
-  //     .order("created_at", { ascending: false });
-
-  //   if (error) {
-  //     throw error;
-  //   }
-
-  //   return data || [];
-  // }
   static async findJobByCustomerUUID(customerUuid) {
     if (!customerUuid) return [];
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("jobs")
       .select(`*`)
       .eq("customer_uuid", customerUuid)
@@ -76,7 +45,7 @@ export default class Job {
 
     const jobUuids = jobs.map((job) => job.uuid);
 
-    const { data: recurrences, error: recurrenceError } = await supabase
+    const { data: recurrences, error: recurrenceError } = await supabase()
       .from("job_recurrences")
       .select(`*`)
       .in("job_uuid", jobUuids)
@@ -101,7 +70,7 @@ export default class Job {
   }
 
   static async countActiveJobs() {
-    const { count, error } = await supabase
+    const { count, error } = await supabase()
       .from("jobs")
       .select("*", { count: "exact", head: true })
       .eq("is_deleted", false)
@@ -122,7 +91,7 @@ export default class Job {
     const future = new Date();
     future.setDate(future.getDate() + days);
 
-    const { count, error } = await supabase
+    const { count, error } = await supabase()
       .from("jobs")
       .select("*", { count: "exact", head: true })
       .eq("is_deleted", false)
@@ -147,7 +116,7 @@ export default class Job {
       throw new Error("Job UUID is required");
     }
 
-    const { data: job, error } = await supabase
+    const { data: job, error } = await supabase()
       .from("jobs")
       .select(`
         uuid,
@@ -186,7 +155,7 @@ export default class Job {
     let jobRecurrences = [];
 
     if (job?.is_recurring) {
-      const { data: recurrences, error: recurrenceError } = await supabase
+      const { data: recurrences, error: recurrenceError } = await supabase()
         .from("job_recurrences")
         .select(`
           uuid,
@@ -227,7 +196,7 @@ export default class Job {
   }
 
   static async markClientScheduleMessageSent(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("jobs")
       .update({
         client_schedule_message_sent_at: new Date().toISOString(),
@@ -244,200 +213,6 @@ export default class Job {
     return data;
   }
 
-  // static async searchSummary(query, limit = 10) {
-  //   const terms = String(query || "")
-  //     .trim()
-  //     .split(/\s+/)
-  //     .filter(Boolean);
-
-  //   if (terms.length === 0) return [];
-
-  //   const orFilter = buildSearchOr(terms, [
-  //     "uuid",
-  //     // "status",
-  //     "job_address",
-  //   ]);
-
-  //   const { data, error } = await supabase
-  //   .from("jobs")
-  //   .select(`
-  //       uuid,
-  //       status,
-  //       job_address,
-  //       scheduled_at,
-  //       total_amount,
-  //       created_at,
-  //       quote:quotes (
-  //         uuid,
-  //         contact_first_name,
-  //         contact_last_name,
-  //         contact_email
-  //       )
-  //     `)
-  //     .or(orFilter)
-  //     .order("created_at", { ascending: false })
-  //     .limit(limit);
-
-  //   if (error) throw error;
-
-  //   const jobs = data || [];
-
-  //   const loweredTerms = terms.map((t) => t.toLowerCase());
-
-  //   const filtered = jobs.filter((job) => {
-  //     const quote = job.quote || {};
-  //     const haystack = [
-  //       job.uuid,
-  //       // job.status,
-  //       job.job_address,
-  //       quote.uuid,
-  //       quote.contact_first_name,
-  //       quote.contact_last_name,
-  //       quote.contact_email,
-  //     ]
-  //       .filter(Boolean)
-  //       .join(" ")
-  //       .toLowerCase();
-
-  //     return loweredTerms.some((term) => haystack.includes(term));
-  //   });
-
-  //   return filtered.slice(0, limit);
-  // }
-
-  // static async searchSummary(query, limit = 10) {
-  //   const terms = String(query || "")
-  //     .trim()
-  //     .split(/\s+/)
-  //     .filter(Boolean);
-
-  //   if (terms.length === 0) return [];
-
-  //   // A) direct jobs
-  //   const jobOrFilter = buildSearchOr(terms, [
-  //     "uuid",
-  //     "job_address",
-  //   ]);
-
-  //   const { data: directJobs, error: directJobsError } = await supabase
-  //     .from("jobs")
-  //     .select(`
-  //       uuid,
-  //       customer_uuid,
-  //       quote_uuid,
-  //       status,
-  //       job_address,
-  //       scheduled_at,
-  //       total_amount,
-  //       created_at
-  //     `)
-  //     .or(jobOrFilter)
-  //     .order("created_at", { ascending: false })
-  //     .limit(limit * 2);
-
-  //   if (directJobsError) throw directJobsError;
-
-  //   // B) find matching quotes
-  //   const quoteOrFilter = buildSearchOr(terms, [
-  //     "uuid",
-  //     "contact_first_name",
-  //     "contact_last_name",
-  //     "contact_email",
-  //     "contact_mobile",
-  //     "contact_landline",
-  //     "address",
-  //   ]);
-
-  //   const { data: matchingQuotes, error: matchingQuotesError } = await supabase
-  //     .from("quotes")
-  //     .select("uuid")
-  //     .or(quoteOrFilter)
-  //     .limit(limit * 5);
-
-  //   if (matchingQuotesError) throw matchingQuotesError;
-
-  //   const quoteUUIDs = [
-  //     ...new Set((matchingQuotes || []).map((q) => q.uuid).filter(Boolean)),
-  //   ];
-
-  //   // C) fetch jobs by quote_uuid
-  //   let quoteJobs = [];
-  //   if (quoteUUIDs.length > 0) {
-  //     const { data, error } = await supabase
-  //       .from("jobs")
-  //       .select(`
-  //         uuid,
-  //         customer_uuid,
-  //         quote_uuid,
-  //         status,
-  //         job_address,
-  //         scheduled_at,
-  //         total_amount,
-  //         created_at
-  //       `)
-  //       .in("quote_uuid", quoteUUIDs)
-  //       .order("created_at", { ascending: false })
-  //       .limit(limit * 2);
-
-  //     if (error) throw error;
-  //     quoteJobs = data || [];
-  //   }
-
-  //   // D) find matching customers
-  //   const customerOrFilter = buildSearchOr(terms, [
-  //     "uuid",
-  //     "first_name",
-  //     "last_name",
-  //     "email",
-  //     "mobile_phone",
-  //     "landline_phone",
-  //     "address",
-  //   ]);
-
-  //   const { data: matchingCustomers, error: matchingCustomersError } = await supabase
-  //     .from("customers")
-  //     .select("uuid")
-  //     .or(customerOrFilter)
-  //     .limit(limit * 5);
-
-  //   if (matchingCustomersError) throw matchingCustomersError;
-
-  //   const customerUUIDs = [
-  //     ...new Set((matchingCustomers || []).map((c) => c.uuid).filter(Boolean)),
-  //   ];
-
-  //   // E) fetch jobs by customer_uuid
-  //   let customerJobs = [];
-  //   if (customerUUIDs.length > 0) {
-  //     const { data, error } = await supabase
-  //       .from("jobs")
-  //       .select(`
-  //         uuid,
-  //         customer_uuid,
-  //         quote_uuid,
-  //         status,
-  //         job_address,
-  //         scheduled_at,
-  //         total_amount,
-  //         created_at
-  //       `)
-  //       .in("customer_uuid", customerUUIDs)
-  //       .order("created_at", { ascending: false })
-  //       .limit(limit * 2);
-
-  //     if (error) throw error;
-  //     customerJobs = data || [];
-  //   }
-
-  //   // F) merge and dedupe
-  //   const mergedMap = new Map();
-
-  //   [...(directJobs || []), ...quoteJobs, ...customerJobs].forEach((job) => {
-  //     if (job?.uuid) mergedMap.set(job.uuid, job);
-  //   });
-
-  //   return Array.from(mergedMap.values()).slice(0, limit);
-  // }
     static async searchSummary(query, limit = 10) {
       const terms = String(query || "")
         .trim()
@@ -485,7 +260,7 @@ export default class Job {
         "notes",
       ]);
 
-      const { data: directJobs, error: directJobsError } = await supabase
+      const { data: directJobs, error: directJobsError } = await supabase()
         .from("jobs")
         .select(baseSelect)
         .or(jobOrFilter)
@@ -505,7 +280,7 @@ export default class Job {
         "address",
       ]);
 
-      const { data: matchingQuotes, error: matchingQuotesError } = await supabase
+      const { data: matchingQuotes, error: matchingQuotesError } = await supabase()
         .from("quotes")
         .select("uuid")
         .or(quoteOrFilter)
@@ -519,7 +294,7 @@ export default class Job {
 
       let quoteJobs = [];
       if (quoteUUIDs.length > 0) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
           .from("jobs")
           .select(baseSelect)
           .in("quote_uuid", quoteUUIDs)
@@ -541,7 +316,7 @@ export default class Job {
         "address",
       ]);
 
-      const { data: matchingCustomers, error: matchingCustomersError } = await supabase
+      const { data: matchingCustomers, error: matchingCustomersError } = await supabase()
         .from("customers")
         .select("uuid")
         .or(customerOrFilter)
@@ -555,7 +330,7 @@ export default class Job {
 
       let customerJobs = [];
       if (customerUUIDs.length > 0) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
           .from("jobs")
           .select(baseSelect)
           .in("customer_uuid", customerUUIDs)
@@ -611,7 +386,7 @@ export default class Job {
 
   // Get all jobs
   static async findAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('jobs')
       .select('*')
       .order('created_at', { ascending: true });
@@ -622,7 +397,7 @@ export default class Job {
   static async findByUUID(uuid) {
     if (!uuid) throw new Error("Job UUID is required");
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("jobs")
       .select(
         `
@@ -694,7 +469,7 @@ export default class Job {
       updatePayload.status = updates.status;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("jobs")
       .update(updatePayload)
       .eq("uuid", uuid)
@@ -744,7 +519,7 @@ export default class Job {
 
       const now = new Date().toISOString();
 
-      const { data, error } = await supabase
+      const { data, error } = await supabase()
         .from("jobs")
         .insert([
           {
@@ -779,7 +554,7 @@ export default class Job {
     }
 
     static async updateByUUID(uuid, updates) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('jobs')
             .update(updates)
             .eq("uuid", uuid)
@@ -791,7 +566,7 @@ export default class Job {
     }
 
     static async deleteByUUID(uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('jobs')
             .delete()
             .eq("uuid", uuid)
@@ -803,7 +578,7 @@ export default class Job {
     }
 
     static async findJobByQuoteUUID(quote_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('jobs')
             .select('*')
             .eq('quote_uuid', quote_uuid)
@@ -814,7 +589,7 @@ export default class Job {
     }
 
     static async deleteByQuoteUUID(quote_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('jobs')
             .delete()
             .eq('quote_uuid', quote_uuid)
@@ -839,9 +614,9 @@ export default class Job {
             : null;
 
         // ✅ jobs.* and nested job_recurrences (filtered client-side to non-deleted)
-        // Supabase doesn't support filtering nested selects super cleanly without RPC,
+        // Supabase() doesn't support filtering nested selects super cleanly without RPC,
         // so we fetch them and filter in JS.
-        let q = supabase
+        let q = supabase()
         .from("jobs")
         .select(
             `
@@ -887,7 +662,7 @@ export default class Job {
     // Backfill jobs.job_address from quotes.address for jobs where job_address is null
     static async backfillJobAddressesFromQuotes() {
         // 1) get jobs missing job_address, include quote address
-        const { data: jobs, error: fetchErr } = await supabase
+        const { data: jobs, error: fetchErr } = await supabase()
             .from("jobs")
             .select(
             `
@@ -917,7 +692,7 @@ export default class Job {
             continue;
             }
 
-            const { error: upErr } = await supabase
+            const { error: upErr } = await supabase()
             .from("jobs")
             .update({
                 job_address: addr,
@@ -953,7 +728,7 @@ export default class Job {
     static async findSummaryByUUID(uuid) {
       if (!uuid) throw new Error("Job UUID is required");
 
-      const { data: job, error: jobErr } = await supabase
+      const { data: job, error: jobErr } = await supabase()
         .from("jobs")
         .select(`
           uuid,
@@ -984,7 +759,7 @@ export default class Job {
 
       if (!job) return null;
 
-      const { count, error: recErr } = await supabase
+      const { count, error: recErr } = await supabase()
         .from("job_recurrences")
         .select("id", { count: "exact", head: true })
         .eq("job_uuid", uuid)
@@ -1060,7 +835,7 @@ export default class Job {
     static async findDetailedByUUID(uuid) {
       if (!uuid) throw new Error("Job UUID is required");
 
-      const { data: job, error: jobErr } = await supabase
+      const { data: job, error: jobErr } = await supabase()
         .from("jobs")
         .select(`
           uuid,
@@ -1110,7 +885,7 @@ export default class Job {
       let quote = null;
 
       if (job.quote_uuid) {
-        const { data: q, error: qErr } = await supabase
+        const { data: q, error: qErr } = await supabase()
           .from("quotes")
           .select(`
             uuid,
@@ -1145,7 +920,7 @@ export default class Job {
         quote = q || null;
       }
 
-      const { data: recs, error: recErr } = await supabase
+      const { data: recs, error: recErr } = await supabase()
         .from("job_recurrences")
         .select(`
           uuid,
@@ -1266,7 +1041,7 @@ export default class Job {
     startOf7DaysLater.setHours(23, 59, 59, 999);
 
     // Base jobs load
-    const { data: jobs, error: jobsError } = await supabase
+    const { data: jobs, error: jobsError } = await supabase()
       .from("jobs")
       .select(`
         uuid,
@@ -1295,7 +1070,7 @@ export default class Job {
 
     let recurrences = [];
     if (jobUUIDs.length > 0) {
-      const { data: recurrenceData, error: recurrenceError } = await supabase
+      const { data: recurrenceData, error: recurrenceError } = await supabase()
         .from("job_recurrences")
         .select(`
           id,

@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 class ChangeLog {
   static tableName = "change_logs";
@@ -61,7 +61,7 @@ class ChangeLog {
         Object.keys(changedFields).length > 0 ? changedFields : null,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .insert([payload])
       .select("*")
@@ -75,7 +75,7 @@ class ChangeLog {
   }
 
   static async findAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .order("created_at", { ascending: false });
@@ -85,7 +85,7 @@ class ChangeLog {
   }
 
   static async findByRecord(table, record_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("table_name", table)
@@ -97,7 +97,7 @@ class ChangeLog {
   }
 
   static async findByUser(user_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("user_uuid", user_uuid)
@@ -108,7 +108,7 @@ class ChangeLog {
   }
 
   static async findByTable(table_name) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("table_name", table_name)
@@ -119,7 +119,7 @@ class ChangeLog {
   }
 
   static async deleteOlderThan(date) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .delete()
       .lt("created_at", date)

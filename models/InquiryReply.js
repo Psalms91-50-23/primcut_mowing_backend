@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 export default class InquiryReply {
 
@@ -14,7 +14,7 @@ export default class InquiryReply {
       sent_at = new Date().toISOString(),
     } = data;
 
-    const { data: reply, error } = await supabase
+    const { data: reply, error } = await supabase()
       .from("inquiry_replies")
       .insert([
         {
@@ -35,7 +35,7 @@ export default class InquiryReply {
   }
 
   static async findByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiry_replies")
       .select("*")
       .eq("uuid", uuid)
@@ -46,7 +46,7 @@ export default class InquiryReply {
   }
 
   static async findByInquiryUUID(inquiry_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiry_replies")
       .select("*")
       .eq("inquiry_uuid", inquiry_uuid)
@@ -57,7 +57,7 @@ export default class InquiryReply {
   }
 
   static async deleteByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiry_replies")
       .delete()
       .eq("uuid", uuid)

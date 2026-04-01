@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import crypto from "crypto";
 
 export default class JobAccessToken {
@@ -13,7 +13,7 @@ export default class JobAccessToken {
     }
 
     static async create({ job_uuid, token_hash, expires_at, uuid }) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("job_access_tokens")
         .insert([{ job_uuid, token_hash, expires_at, uuid }])
         .select("*")
@@ -24,7 +24,7 @@ export default class JobAccessToken {
     }
 
     static async findByTokenHash(tokenHash) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("job_access_tokens")
         .select("*")
         .eq("token_hash", tokenHash)
@@ -38,7 +38,7 @@ export default class JobAccessToken {
     }
 
     static async markViewed(token_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .rpc("increment_job_access_view", { token_uuid });
 
         if (error) throw new Error(`Error updating view count: ${error.message}`);
@@ -47,7 +47,7 @@ export default class JobAccessToken {
 
     static async incrementViewCount(token_uuid) {
         try {
-        const { data: existingRow, error: fetchError } = await supabase
+        const { data: existingRow, error: fetchError } = await supabase()
             .from("job_access_tokens")
             .select("*")
             .eq("uuid", token_uuid)
@@ -60,7 +60,7 @@ export default class JobAccessToken {
 
         const nowIso = new Date().toISOString();
 
-        const { data, error: updateError } = await supabase
+        const { data, error: updateError } = await supabase()
             .from("job_access_tokens")
             .update({
             view_count: (existingRow.view_count || 0) + 1,
@@ -84,7 +84,7 @@ export default class JobAccessToken {
     }
 
     static async revokeAllForJob(job_uuid) {
-        const { error } = await supabase
+        const { error } = await supabase()
         .from("job_access_tokens")
         .delete()
         .eq("job_uuid", job_uuid);
@@ -93,7 +93,7 @@ export default class JobAccessToken {
     }
 
     static async findByUUID(uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("job_access_tokens")
         .select("*")
         .eq("uuid", uuid)
@@ -105,7 +105,7 @@ export default class JobAccessToken {
     }
 
     static async findOne(job_uuid, token_hash) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("job_access_tokens")
         .select("*")
         .eq("job_uuid", job_uuid)
@@ -118,7 +118,7 @@ export default class JobAccessToken {
     }
 
     static async revokeToken(tokenHash) {
-        const { error } = await supabase
+        const { error } = await supabase()
         .from("job_access_tokens")
         .delete()
         .eq("token_hash", tokenHash);
@@ -129,7 +129,7 @@ export default class JobAccessToken {
     static async findValidToken({ job_uuid, token_hash }) {
         const nowIso = new Date().toISOString();
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("job_access_tokens")
         .select("*")
         .eq("job_uuid", job_uuid)

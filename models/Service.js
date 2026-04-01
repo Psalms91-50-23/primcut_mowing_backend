@@ -1,10 +1,10 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 class Service {
   static tableName = "services";
 
   static async getAllActive() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select(
         "uuid, code, label, description, category, requires_images, urgent_allowed"
@@ -22,7 +22,7 @@ class Service {
   }
 
   static async getAllCategory() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("category")
       .eq("is_active", true)
@@ -40,7 +40,7 @@ class Service {
   static async getByUUID(uuid) {
     if (!uuid) throw new Error("uuid is required");
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select(
         "uuid, code, label, description, category, requires_images, urgent_allowed, is_active, is_deleted, created_at, updated_at"
@@ -58,7 +58,7 @@ class Service {
   static async getByCode(code) {
     if (!code) throw new Error("code is required");
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select(
         "uuid, code, label, description, category, requires_images, urgent_allowed, is_active, is_deleted, created_at, updated_at"

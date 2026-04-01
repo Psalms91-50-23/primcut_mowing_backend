@@ -1,4 +1,4 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 import { generatePrefixedId } from '../util/util.js';
 
 function getDefaultRecurrenceCount(freq) {
@@ -61,7 +61,7 @@ class JobRecurrence {
       const from = (safePage - 1) * safeLimit;
       const to = from + safeLimit - 1;
 
-      const { data, error, count } = await supabase
+      const { data, error, count } = await supabase()
         .from("job_recurrences")
         .select("*", { count: "exact" })
         .eq("job_uuid", jobUuid)
@@ -126,7 +126,7 @@ class JobRecurrence {
       const maxOccurrences = 100;
 
       // 1) Delete future incomplete recurrences
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await supabase()
         .from("job_recurrences")
         .delete()
         .eq("job_uuid", jobUUID)
@@ -163,7 +163,7 @@ class JobRecurrence {
           do {
             recurrenceUUID = generatePrefixedId("JR", 7);
             // recurrenceUUID = generateShortId(9);
-            const { data, error } = await supabase
+            const { data, error } = await supabase()
               .from("job_recurrences")
               .select("id")
               .eq("uuid", recurrenceUUID)
@@ -201,7 +201,7 @@ class JobRecurrence {
         return [];
       }
 
-      const { data: insertedRows, error: insertError } = await supabase
+      const { data: insertedRows, error: insertError } = await supabase()
         .from("job_recurrences")
         .insert(rows)
         .select("*");
@@ -217,7 +217,7 @@ class JobRecurrence {
       if (!jobUuid) throw new Error("Job UUID is required");
       if (!recurrenceId) throw new Error("Recurrence ID is required");
 
-      const { data, error } = await supabase
+      const { data, error } = await supabase()
         .from("job_recurrences")
         .select("*")
         .eq("job_uuid", jobUuid)
@@ -261,7 +261,7 @@ class JobRecurrence {
       updatePayload.is_custom_schedule = updates.is_custom_schedule;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("job_recurrences")
       .update(updatePayload)
       .eq("job_uuid", jobUUID)
@@ -283,7 +283,7 @@ class JobRecurrence {
       status = 'scheduled', 
       is_completed = false, 
       completed_date = null }) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('job_recurrences')
             .insert([{
                 uuid,
@@ -304,7 +304,7 @@ class JobRecurrence {
 
     // Fetch all recurrences for a given job
     static async findByJob(job_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('job_recurrences')
             .select('*')
             .eq('job_uuid', job_uuid)
@@ -316,7 +316,7 @@ class JobRecurrence {
 
     // Fetch a single recurrence by UUID
     static async findByUUID(uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('job_recurrences')
             .select('*')
             .eq('uuid', uuid)
@@ -329,7 +329,7 @@ class JobRecurrence {
     // Update a recurrence (status, completed, date, etc.)
     static async update(uuid, updates = {}) {
         updates.updated_at = new Date().toISOString();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('job_recurrences')
             .update(updates)
             .eq('uuid', uuid)
@@ -362,7 +362,7 @@ class JobRecurrence {
         if (soft) {
             return this.update(uuid, { status: 'deleted' });
         } else {
-            const { data, error } = await supabase
+            const { data, error } = await supabase()
                 .from('job_recurrences')
                 .delete()
                 .eq('uuid', uuid);
@@ -383,7 +383,7 @@ class JobRecurrence {
     }
 
     // 1️⃣ Get job recurrence settings
-    const { data: job, error: jobError } = await supabase
+    const { data: job, error: jobError } = await supabase()
       .from("jobs")
       .select(`
         uuid,
@@ -416,7 +416,7 @@ class JobRecurrence {
     const interval = recurrence_interval || 1;
 
     // 2️⃣ Find latest recurrence
-    const { data: lastRecurrence, error: lastError } = await supabase
+    const { data: lastRecurrence, error: lastError } = await supabase()
       .from("job_recurrences")
       .select("scheduled_at")
       .eq("job_uuid", jobUUID)
@@ -473,7 +473,7 @@ class JobRecurrence {
     }
 
     // 4️⃣ Insert
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("job_recurrences")
       .insert(rows)
       .select("*");
@@ -492,7 +492,7 @@ class JobRecurrence {
 
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("job_recurrences")
       .select("*")
       .eq("job_uuid", jobUUID)
@@ -515,7 +515,7 @@ class JobRecurrence {
     const now = new Date().toISOString();
 
     // Only delete FUTURE + NOT completed recurrences
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("job_recurrences")
       .delete()
       .eq("job_uuid", jobUUID)

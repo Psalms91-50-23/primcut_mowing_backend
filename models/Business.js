@@ -1,9 +1,9 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 
 class Business {
   // Get all businesses
   static async findAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .select('*')
       .order('created_at', { ascending: true });
@@ -16,7 +16,7 @@ class Business {
     if (!uuid) {
       throw new Error('UUID is required to find a business');
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .select('*')
       .eq('uuid', uuid)
@@ -30,7 +30,7 @@ class Business {
     if (!name) {
       throw new Error('Business name is required to find a business');
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .select('*')
       .ilike('name', name) 
@@ -45,7 +45,7 @@ class Business {
     if (!business) {
       throw new Error('Business data is required to create a business');
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .insert([business])
       .select()
@@ -58,7 +58,7 @@ class Business {
     if (!email) {
         throw new Error('Email is required to find a business');
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .select('*')
       .eq('email', email)
@@ -77,7 +77,7 @@ class Business {
     if (!updates) {
       throw new Error('Update data is required to update a business');
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('uuid', uuid)
@@ -93,7 +93,7 @@ class Business {
       throw new Error('UUID is required to soft delete a business');
     }
     const now = new Date().toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .update({ deleted_at: now, updated_at: now, is_deleted: true })
       .eq('uuid', uuid)
@@ -104,7 +104,7 @@ class Business {
 
   // Reinstate
   static async reinstate(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .update({ deleted_at: null, updated_at: new Date().toISOString() })
       .eq('uuid', uuid)
@@ -115,7 +115,7 @@ class Business {
 
   // Hard delete
   static async delete(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('businesses')
       .delete()
       .eq('uuid', uuid)
@@ -126,7 +126,7 @@ class Business {
   }
 
   static async findByPhone(phone) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('customers')
       .select('*')
       .eq('mobile_phone', phone)

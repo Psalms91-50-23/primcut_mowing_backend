@@ -1,4 +1,4 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 import { getQuotePdfPublicUrl } from '../util/getQuotePdfPublicUrl.js';
 import { buildSearchOr } from '../util/util.js';
 
@@ -6,7 +6,7 @@ export default class Customer {
 
     static async countAllActive() {
 
-        const { count, error } = await supabase
+        const { count, error } = await supabase()
             .from("customers")
             .select("*", { count: "exact", head: true })
             .is("deleted_at", null);
@@ -19,7 +19,7 @@ export default class Customer {
     }
 
     static async findCustomerByUUID (uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("customers")
             .select("*")
             .eq("uuid", uuid)
@@ -38,7 +38,7 @@ export default class Customer {
             throw new Error("Customer UUID is required");
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .select("*")
             .eq("customer_uuid", uuid)
@@ -77,7 +77,7 @@ export default class Customer {
     //     if (!uuid) {
     //         throw new Error("Customer UUID is required");
     //     }
-    //     const { data, error } = await supabase
+    //     const { data, error } = await supabase()
     //         .from('quotes')
     //         .select('*')
     //         .eq('customer_uuid', uuid)
@@ -100,7 +100,7 @@ export default class Customer {
     //     if (!uuid) {
     //         throw new Error("Customer UUID is required");
     //     }
-    //     const { data, error } = await supabase
+    //     const { data, error } = await supabase()
     //         .from('quotes')
     //         .select('*')
     //         .eq('customer_uuid', uuid)
@@ -118,7 +118,7 @@ export default class Customer {
             throw new Error("Customer UUID is required");
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("jobs")
             .select(`
                 *,
@@ -156,7 +156,7 @@ export default class Customer {
         "address",
         ]);
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("customers")
         .select("uuid, first_name, last_name, email, mobile_phone, landline_phone, address, created_at")
         .or(orFilter)
@@ -174,7 +174,7 @@ export default class Customer {
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
 
-        const { data, error, count } = await supabase
+        const { data, error, count } = await supabase()
         .from("customers")
         .select(`
             *,
@@ -203,7 +203,7 @@ export default class Customer {
         let query;
         
         if (includeBusiness) {
-            query = supabase
+            query = supabase()
                 .from('customers')
                 .select(`
                     *,
@@ -222,7 +222,7 @@ export default class Customer {
                     )
                 `);
         } else {
-            query = supabase
+            query = supabase()
                 .from('customers')
                 .select('*');
         }
@@ -244,7 +244,7 @@ export default class Customer {
     }
 
     static async findByField(field, value) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq(field, value);
@@ -260,7 +260,7 @@ export default class Customer {
         if (!uuid) {
             throw new Error("Customer UUID is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq("uuid", uuid)
@@ -279,7 +279,7 @@ export default class Customer {
         if (!id) {
             throw new Error("Customer ID is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq('id', id)
@@ -297,7 +297,7 @@ export default class Customer {
         if (!customer) {
             throw new Error("Customer data is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .insert([customer])
             .select()
@@ -317,7 +317,7 @@ export default class Customer {
         if (!customer) {
             throw new Error("Customer data is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .update(customer)
             .eq('id', id)
@@ -338,7 +338,7 @@ export default class Customer {
         if (!customer) {
             throw new Error("Customer data is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from('customers')
         .update(customer)
         .eq('uuid', uuid)
@@ -359,7 +359,7 @@ export default class Customer {
         if (!uuid) {
             throw new Error("Customer UUID is required");
         }
-        const { data: customer, error: fetchError } = await supabase
+        const { data: customer, error: fetchError } = await supabase()
         .from('customers')
         .select('*')
         .eq('uuid', uuid)
@@ -372,7 +372,7 @@ export default class Customer {
             throw new Error(`Customer with UUID ${uuid} not found`);
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .delete()
             .eq('uuid', uuid)
@@ -387,7 +387,7 @@ export default class Customer {
     //works fine 9/01/2026  
     static async softDeleteCustomer (uuid) {
         const now = new Date().toISOString();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .update({ deleted_at: now, updated_at: now, is_deleted: true })
             .eq('uuid', uuid)
@@ -401,7 +401,7 @@ export default class Customer {
 
     static async reinstateCustomer(uuid) {
         const now = new Date().toISOString();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .update({ deleted_at: null , updated_at: now , is_deleted: false})
             .eq('uuid', uuid)
@@ -416,7 +416,7 @@ export default class Customer {
 
     static async findByEmail(email) {
         const cleanEmail = email?.toLowerCase().trim();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq('email', cleanEmail)
@@ -433,7 +433,7 @@ export default class Customer {
         const cleanEmail = email?.toLowerCase().trim();
         const cleanFirst = firstName?.trim();
         const cleanLast = lastName?.trim();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .ilike('email', cleanEmail)
@@ -457,7 +457,7 @@ export default class Customer {
         ].filter(Boolean);
         if (orCondition.length === 0) return null;
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .or(orCondition.join(','))
@@ -475,7 +475,7 @@ export default class Customer {
     }   
 
     static async findByAddress(address) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq('address', address)
@@ -488,7 +488,7 @@ export default class Customer {
     }   
 
     static async findByName(firstName, lastName) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq('first_name', firstName)
@@ -502,7 +502,7 @@ export default class Customer {
     }
 
     static async findByBusinessUUID(business_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('customers')
             .select('*')
             .eq('business_uuid', business_uuid)
@@ -516,7 +516,7 @@ export default class Customer {
 
     static async findOneCustomerWithDetails(uuid) {
         if (!uuid) return null;
-        let query = supabase
+        let query = supabase()
             .from('customers')
             .select(`
                 *,
@@ -546,7 +546,7 @@ export default class Customer {
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
 
-        const { data, error, count } = await supabase
+        const { data, error, count } = await supabase()
             .from('customers')
             .select(`
                 *,
@@ -593,7 +593,7 @@ export default class Customer {
             "created_via",
         ].join(",");
 
-        const { data: customer, error: custErr } = await supabase
+        const { data: customer, error: custErr } = await supabase()
             .from("customers")
             .select(customerSelect)
             .eq("uuid", uuid)
@@ -607,7 +607,7 @@ export default class Customer {
         if (!customer) return null;
 
         // Total quotes
-        const { count: quoteCount, error: quoteErr } = await supabase
+        const { count: quoteCount, error: quoteErr } = await supabase()
             .from("quotes")
             .select("id", { count: "exact", head: true })
             .eq("customer_uuid", uuid)
@@ -618,7 +618,7 @@ export default class Customer {
         }
 
         // Active quotes
-        const { count: activeQuoteCount, error: activeQuoteErr } = await supabase
+        const { count: activeQuoteCount, error: activeQuoteErr } = await supabase()
             .from("quotes")
             .select("id", { count: "exact", head: true })
             .eq("customer_uuid", uuid)
@@ -630,7 +630,7 @@ export default class Customer {
         }
 
         // Latest quote created_at
-        const { data: latestQuote, error: latestQuoteErr } = await supabase
+        const { data: latestQuote, error: latestQuoteErr } = await supabase()
             .from("quotes")
             .select("created_at")
             .eq("customer_uuid", uuid)
@@ -644,7 +644,7 @@ export default class Customer {
         }
 
         // Jobs list for counts + latest job
-        const { data: jobs, error: jobsErr } = await supabase
+        const { data: jobs, error: jobsErr } = await supabase()
             .from("jobs")
             .select("uuid, status, is_completed, scheduled_at, created_at")
             .eq("customer_uuid", uuid)
@@ -684,7 +684,7 @@ export default class Customer {
 
         let recurrenceCount = 0;
         if (jobUuids.length > 0) {
-            const { count, error: recErr } = await supabase
+            const { count, error: recErr } = await supabase()
             .from("job_recurrences")
             .select("id", { count: "exact", head: true })
             .in("job_uuid", jobUuids)
@@ -745,7 +745,7 @@ export default class Customer {
   static async findDetailedByUUID(uuid) {
     if (!uuid) throw new Error("Customer UUID is required");
 
-    const { data: customer, error: custErr } = await supabase
+    const { data: customer, error: custErr } = await supabase()
       .from("customers")
       .select("*")
       .eq("uuid", uuid)
@@ -756,7 +756,7 @@ export default class Customer {
     if (!customer) return null;
 
     // Quotes (non-deleted)
-    const { data: quotes, error: quotesErr } = await supabase
+    const { data: quotes, error: quotesErr } = await supabase()
       .from("quotes")
       .select("*")
       .eq("customer_uuid", uuid)
@@ -766,7 +766,7 @@ export default class Customer {
     if (quotesErr) throw new Error(`Error fetching quotes for customer ${uuid}: ${quotesErr.message}`);
 
     // Jobs (non-deleted)
-    const { data: jobs, error: jobsErr } = await supabase
+    const { data: jobs, error: jobsErr } = await supabase()
       .from("jobs")
       .select("*")
       .eq("customer_uuid", uuid)
@@ -780,7 +780,7 @@ export default class Customer {
     // Fetch all recurrences for all jobs in one go
     let recurrences = [];
     if (jobUuids.length > 0) {
-      const { data: recs, error: recErr } = await supabase
+      const { data: recs, error: recErr } = await supabase()
         .from("job_recurrences")
         .select("*")
         .in("job_uuid", jobUuids)
@@ -815,7 +815,7 @@ export default class Customer {
     if (!uuid) {
       throw new Error("Customer UUID is required");
     }
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("customer_contacts")
       .select("*")
       .eq("customer_uuid", uuid)
@@ -844,7 +844,7 @@ export default class Customer {
     if (!uuid) throw new Error("Customer UUID is required");
 
     // 1. Customer
-    const { data: customer, error: customerError } = await supabase
+    const { data: customer, error: customerError } = await supabase()
         .from("customers")
         .select("*")
         .eq("uuid", uuid)
@@ -858,7 +858,7 @@ export default class Customer {
     if (!customer) return null;
 
     // 2. Quotes
-    const { data: quotes, error: quotesError } = await supabase
+    const { data: quotes, error: quotesError } = await supabase()
         .from("quotes")
         .select("*")
         .eq("customer_uuid", uuid)
@@ -870,7 +870,7 @@ export default class Customer {
     }
 
     // 3. Jobs
-    const { data: jobs, error: jobsError } = await supabase
+    const { data: jobs, error: jobsError } = await supabase()
         .from("jobs")
         .select("*")
         .eq("customer_uuid", uuid)
@@ -887,7 +887,7 @@ export default class Customer {
     // 4. Recurrences for all jobs
     let recurrences = [];
     if (jobUuids.length > 0) {
-        const { data: recurrenceData, error: recurrencesError } = await supabase
+        const { data: recurrenceData, error: recurrencesError } = await supabase()
         .from("job_recurrences")
         .select("*")
         .in("job_uuid", jobUuids)
@@ -916,7 +916,7 @@ export default class Customer {
     }));
 
     // 5. Inquiries
-    const { data: inquiries, error: inquiriesError } = await supabase
+    const { data: inquiries, error: inquiriesError } = await supabase()
         .from("inquiries")
         .select("*")
         .eq("customer_uuid", uuid)
@@ -927,7 +927,7 @@ export default class Customer {
     }
 
     // 6. Linked user (if one exists)
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await supabase()
         .from("users")
         .select(`
         uuid,

@@ -1,4 +1,4 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 
 export default class Employee {
 
@@ -6,7 +6,7 @@ export default class Employee {
     static async findByUserUUID(user_uuid) {
         if (!user_uuid) throw new Error("User UUID is required");
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('employees')
             .select('*')
             .eq("user_uuid", user_uuid)
@@ -22,7 +22,7 @@ export default class Employee {
             throw new Error("Employee object with user_uuid is required");
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('employees')
             .insert([employeeObj])
             .select("*")
@@ -37,7 +37,7 @@ export default class Employee {
         if (!user_uuid) throw new Error("User UUID is required");
         if (!updateObj) throw new Error("Update object is required");
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('employees')
             .update(updateObj)
             .eq("user_uuid", user_uuid)
@@ -52,7 +52,7 @@ export default class Employee {
     static async hardDelete(user_uuid) {
         if (!user_uuid) throw new Error("User UUID is required");
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('employees')
             .delete()
             .eq("user_uuid", user_uuid)
@@ -65,7 +65,7 @@ export default class Employee {
 
     // List all employees
     static async list() {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('employees')
             .select(`*, users:first_name,last_name,email`)
             .eq('users.role', 'employee');

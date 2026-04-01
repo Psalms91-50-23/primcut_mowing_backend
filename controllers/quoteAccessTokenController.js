@@ -4,7 +4,7 @@ import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { sendQuoteToClient } from "../lib/email/index.js";
 import { formatExpiry, formatFullName, generatePrefixedId } from "../util/util.js";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 const TOKEN_EXPIRY_DAYS = 3;
 
@@ -54,12 +54,12 @@ export const viewQuotePdf = async (req, res) => {
       return res.status(404).json({ message: "Quote PDF not available" });
     }
 
-    const { data, error } = await supabase.storage
+    const { data, error } = await supabase().storage
       .from("quotes-pdf")
       .download(pdfPath);
 
     if (error) {
-      console.error("Supabase download error:", error);
+      console.error("Supabase() download error:", error);
       return res.status(500).json({ message: "Failed to load PDF" });
     }
 

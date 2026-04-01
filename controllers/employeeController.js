@@ -1,6 +1,6 @@
 import Employee from '../models/Employee.js';
 import User from '../models/User.js';
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import { normalizeNZPhone, generatePrefixedId } from '../util/util.js';
 import { formatFullName, EMAIL_TOKEN_EXPIRES_IN } from '../util/util.js';
@@ -189,7 +189,7 @@ export const deleteEmployee = async (req, res) => {
         // Optional: delete user auth and local user
         const user = await User.findByUUID(user_uuid);
         if (user) {
-            await supabase.auth.admin.deleteUser(user.auth_user_id).catch(() => {});
+            await supabase().auth.admin.deleteUser(user.auth_user_id).catch(() => {});
             await User.hardDeleteUserLocally(user_uuid).catch(() => {});
         }
 

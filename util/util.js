@@ -1180,3 +1180,9 @@ export const formatMoney = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+export const normalizeVersion = (version) => {
+  const trimmed = String(version).trim().toLowerCase();
+  const noPrefix = trimmed.replace(/^v+/, "");
+  return `v${noPrefix}`;
+};

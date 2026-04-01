@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import User from "../models/User.js";
 import Customer from "../models/Customer.js";
 import Employee from "../models/Employee.js";
@@ -61,7 +61,7 @@ export const requestUserRegistration = async (req, res) => {
     }
 
     const { data: authUsersData, error: authUsersError } =
-      await supabase.auth.admin.listUsers();
+      await supabase().auth.admin.listUsers();
 
     if (authUsersError) {
       throw new Error(authUsersError.message);
@@ -243,7 +243,7 @@ export const requestPrivilegedUserRegistration = async (req, res) => {
     }
 
     const { data: authUsersData, error: authUsersError } =
-      await supabase.auth.admin.listUsers();
+      await supabase().auth.admin.listUsers();
 
     if (authUsersError) {
       throw new Error(authUsersError.message);
@@ -417,7 +417,7 @@ export const requestPrivilegedUserRegistration = async (req, res) => {
 //     }
 
 //     const { data: authUsersData, error: authUsersError } =
-//       await supabase.auth.admin.listUsers();
+//       await supabase().auth.admin.listUsers();
 
 //     if (authUsersError) {
 //       throw new Error(authUsersError.message);
@@ -530,7 +530,7 @@ export const requestPrivilegedUserRegistration = async (req, res) => {
 /**
  * STEP 2
  * Frontend calls this after user clicks email link and submits password.
- * This creates Supabase auth user + local DB user only after confirmation.
+ * This creates Supabase() auth user + local DB user only after confirmation.
  */
 export const completeUserRegistration = async (req, res) => {
   const { token, password } = req.body;
@@ -580,7 +580,7 @@ export const completeUserRegistration = async (req, res) => {
     }
 
     const { data: authUsersData, error: authUsersError } =
-      await supabase.auth.admin.listUsers();
+      await supabase().auth.admin.listUsers();
 
     if (authUsersError) {
       throw new Error(authUsersError.message);
@@ -594,7 +594,7 @@ export const completeUserRegistration = async (req, res) => {
       return res.status(409).json({ error: "Email already registered in auth" });
     }
 
-    const { data, error: authError } = await supabase.auth.admin.createUser({
+    const { data, error: authError } = await supabase().auth.admin.createUser({
       email: normalizedEmail,
       password,
       email_confirm: true,
@@ -759,7 +759,7 @@ export const completeUserRegistration = async (req, res) => {
 
     if (authUser?.id) {
       try {
-        await supabase.auth.admin.deleteUser(authUser.id);
+        await supabase().auth.admin.deleteUser(authUser.id);
       } catch (cleanupErr) {
         console.error("FAILED TO ROLLBACK AUTH USER", cleanupErr);
       }

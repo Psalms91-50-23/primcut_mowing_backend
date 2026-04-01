@@ -119,7 +119,7 @@ export const registerUser = async (req, res) => {
       resolvedCustomer = customerExists;
     }
 
-    const { data: existingUsers } = await supabase.auth.admin.listUsers({
+    const { data: existingUsers } = await supabase().auth.admin.listUsers({
       email: normalizedEmail,
     });
 
@@ -127,7 +127,7 @@ export const registerUser = async (req, res) => {
       return res.status(409).json({ error: "Email already registered" });
     }
 
-    const { data, error: authError } = await supabase.auth.admin.createUser({
+    const { data, error: authError } = await supabase().auth.admin.createUser({
       email: normalizedEmail,
       password,
       options: {
@@ -174,7 +174,7 @@ export const registerUser = async (req, res) => {
 
     const verifyLink = `${process.env.CLIENT_URL}/verify?token=${emailToken}`;
 
-    const { error: rpcError } = await supabase.rpc(
+    const { error: rpcError } = await supabase().rpc(
       "admin_confirmation_sent",
       { user_id: authUser.id }
     );
@@ -227,7 +227,7 @@ export const registerUser = async (req, res) => {
   } catch (err) {
     if (authUser?.id) {
       try {
-        await supabase.auth.admin.deleteUser(authUser.id);
+        await supabase().auth.admin.deleteUser(authUser.id);
       } catch (cleanupErr) {
         console.error("FAILED TO ROLLBACK AUTH USER", cleanupErr);
       }
@@ -286,7 +286,7 @@ export const login = async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseNonAdmin.auth.signInWithPassword({
+    const { data, error } = await supabaseNonAdmin().auth.signInWithPassword({
       email: email.toLowerCase().trim(),
       password,
     });
@@ -421,7 +421,7 @@ export const logout = async (req, res) => {
         }
       );
 
-      await scopedSupabase.auth.signOut();
+      await scopedSupabase().auth.signOut();
     }
 
     res.cookie("accessToken", "", {
@@ -458,14 +458,14 @@ export const getCurrentUser = async (req, res) => {
 
     let sessionUser;
 
-    const { data, error } = await supabase.auth.getUser(accessToken);
+    const { data, error } = await supabase().auth.getUser(accessToken);
 
     if (error || !data?.user) {
       if (!refreshToken) {
         return res.status(401).json({ error: "Access token expired, please log in again" });
       }
 
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+      const { data: refreshData, error: refreshError } = await supabase().auth.refreshSession({
         refresh_token: refreshToken,
       });
 
@@ -595,7 +595,7 @@ export const verifyEmail = async (req, res) => {
       });
     }
 
-    const { error: authError } = await supabase.auth.admin.updateUserById(
+    const { error: authError } = await supabase().auth.admin.updateUserById(
       user.auth_user_id,
       {
         email_confirm: true,
@@ -832,13 +832,13 @@ export const deleteSupabaseUser = async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase.auth.admin.deleteUser(authUserId);
+    const { data, error } = await supabase().auth.admin.deleteUser(authUserId);
 
     if (error) {
       return res.status(400).json({ error: error.message });
     }
 
-    return res.status(200).json({ message: `Supabase user ${authUserId} deleted successfully`, data });
+    return res.status(200).json({ message: `Supabase() user ${authUserId} deleted successfully`, data });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -858,7 +858,7 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
       return res.status(400).json({ error: `User not found with authUserId: ${authUserId}` });
     }
 
-    const { error: supabaseError } = await supabase.auth.admin.deleteUser(authUserId);
+    const { error: supabaseError } = await supabase().auth.admin.deleteUser(authUserId);
 
     if (supabaseError) {
       return res.status(400).json({ error: supabaseError.message });
@@ -874,7 +874,7 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
       record_uuid: user.uuid,
       user_uuid: actorUserUuid,
       action: "delete",
-      summary: "User deleted from Supabase and local DB",
+      summary: "User deleted from Supabase() and local DB",
       changed_fields: {
         deleted_record: {
           uuid: user.uuid,
@@ -888,7 +888,7 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
     });
 
     return res.status(200).json({
-      message: `Supabase user ${authUserId} deleted successfully`,
+      message: `Supabase() user ${authUserId} deleted successfully`,
       data: userDeleted
     });
   } catch (err) {
@@ -910,7 +910,7 @@ export const verifyUser = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const { data: authUser, error: authError } = await supabase.auth.admin.updateUserById(authUserId, {
+    const { data: authUser, error: authError } = await supabase().auth.admin.updateUserById(authUserId, {
       email_confirm: true
     });
 
@@ -1056,11 +1056,11 @@ export const hardDeleteFull = async (req, res) => {
 
     await UserLogin.deleteByUUID(user.uuid);
 
-    const { data: authUser, error: authError } = await supabase.auth.admin.deleteUser(user.auth_user_id);
+    const { data: authUser, error: authError } = await supabase().auth.admin.deleteUser(user.auth_user_id);
     if (authError) {
       return res.status(400).json({
         error: authError.message,
-        message: "User deleted from local DB but failed to delete from Supabase Auth"
+        message: "User deleted from local DB but failed to delete from Supabase() Auth"
       });
     }
 
@@ -1186,7 +1186,7 @@ export const deleteUserByEmail = async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase.auth.admin.listUsers({ email });
+    const { data, error } = await supabase().auth.admin.listUsers({ email });
     if (error) throw error;
 
     const users = data?.users || [];
@@ -1196,7 +1196,7 @@ export const deleteUserByEmail = async (req, res) => {
     }
 
     const userId = users[0].id;
-    await supabase.auth.admin.deleteUser(userId);
+    await supabase().auth.admin.deleteUser(userId);
 
     return res.status(200).json({ message: "User deleted successfully", data: users });
   } catch (err) {
@@ -1211,7 +1211,7 @@ export const refreshToken = async (req, res) => {
     return res.status(401).json({ error: "No refresh token" });
   }
 
-  const { data, error } = await supabase.auth.refreshSession({
+  const { data, error } = await supabase().auth.refreshSession({
     refresh_token: refreshToken,
   });
 
@@ -1232,7 +1232,7 @@ export const refreshToken = async (req, res) => {
 export const generateResetLink = async (req, res) => {
   const { email } = req.body;
 
-  const { data, error } = await supabase.auth.api.resetPasswordForEmail(email, {
+  const { data, error } = await supabase().auth.api.resetPasswordForEmail(email, {
     redirectTo: `${process.env.CLIENT_URL}/reset-password`,
   });
 
@@ -1253,7 +1253,7 @@ export const requestPasswordReset = async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    await supabase.from("password_reset_tokens").insert({
+    await supabase().from("password_reset_tokens").insert({
       user_id: user.id,
       token_hash: tokenHash,
       expires_at: new Date(Date.now() + 1000 * 60 * 30),
@@ -1281,7 +1281,7 @@ export const resetPassword = async (req, res) => {
 
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-  const { data: record } = await supabase
+  const { data: record } = await supabase()
     .from("password_reset_tokens")
     .select("*")
     .eq("token_hash", tokenHash)
@@ -1293,9 +1293,9 @@ export const resetPassword = async (req, res) => {
     return res.status(400).json({ error: "Invalid or expired token" });
   }
 
-  await supabase.auth.admin.updateUserById(record.user_id, { password: newPassword });
+  await supabase().auth.admin.updateUserById(record.user_id, { password: newPassword });
 
-  await supabase
+  await supabase()
     .from("password_reset_tokens")
     .update({ used_at: new Date() })
     .eq("id", record.id);
@@ -1350,9 +1350,9 @@ export const createUserEmptyEmployee = async (req, res) => {
       return res.status(409).json({ message: "Email already exists in DB." });
     }
 
-    const { data: existingUsers } = await supabase.auth.admin.listUsers({ email: normalizedEmail });
+    const { data: existingUsers } = await supabase().auth.admin.listUsers({ email: normalizedEmail });
     if (existingUsers?.length) {
-      return res.status(409).json({ message: "Email already registered in Supabase." });
+      return res.status(409).json({ message: "Email already registered in Supabase()." });
     }
 
     let uuid, exists;
@@ -1412,14 +1412,14 @@ export const createUserEmptyEmployee = async (req, res) => {
     }
 
     const { data: supabaseData, error: supabaseError } =
-      await supabase.auth.admin.generateLink({
+      await supabase().auth.admin.generateLink({
         type: "invite",
         email: normalizedEmail,
-        options: { redirectTo: `${process.env.FRONTEND_URL_HAPPY_LAWNS}/user/set-password` }
+        options: { redirectTo: `${process.env.FRONTEND_URL_HAPPY_PROPERTY}/user/set-password` }
       });
 
     if (supabaseError) {
-      console.error("Supabase generateLink error:", supabaseError);
+      console.error("Supabase() generateLink error:", supabaseError);
       return res.status(500).json({ message: "Failed to generate invite link" });
     }
 

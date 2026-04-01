@@ -5,8 +5,6 @@ export function requireRole(...inputRoles) {
       : inputRoles;
 
   return (req, res, next) => {
-    console.log("requireRole user:", req.user);
-    console.log("required roles:", roles);
 
     if (!req.user) {
       return res.status(401).json({ error: "Unauthorized" });

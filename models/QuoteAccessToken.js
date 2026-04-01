@@ -1,9 +1,9 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 
 export default class QuoteAccessToken {
 
     static async create({ quote_uuid, token_hash, expires_at, uuid }) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quote_access_tokens")
             .insert([{ quote_uuid, token_hash, expires_at, uuid }])
             .select("*")
@@ -14,7 +14,7 @@ export default class QuoteAccessToken {
     }
 
     static async findByTokenHash(tokenHash) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quote_access_tokens")
             .select("*")
             .eq("token_hash", tokenHash)
@@ -28,7 +28,7 @@ export default class QuoteAccessToken {
     }
 
     static async markViewed(token_uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .rpc("increment_quote_access_view", { token_uuid });
 
         if (error) throw new Error(`Error updating view count: ${error.message}`);
@@ -38,7 +38,7 @@ export default class QuoteAccessToken {
     static async incrementViewCount(token_uuid) {
         try {
             // 1️⃣ Fetch the existing row
-            const { data: existingRow, error: fetchError } = await supabase
+            const { data: existingRow, error: fetchError } = await supabase()
                 .from("quote_access_tokens")
                 .select("*")
                 .eq("uuid", token_uuid)
@@ -50,7 +50,7 @@ export default class QuoteAccessToken {
             }
 
             // 2️⃣ Update the row: increment view_count and update timestamps
-            const { data, error: updateError } = await supabase
+            const { data, error: updateError } = await supabase()
                 .from("quote_access_tokens")
                 .update({
                     view_count: (existingRow.view_count || 0) + 1,
@@ -75,7 +75,7 @@ export default class QuoteAccessToken {
     }
 
     static async revokeAllForQuote(quote_uuid) {
-        const { error } = await supabase
+        const { error } = await supabase()
             .from("quote_access_tokens")
             .delete()
             .eq("quote_uuid", quote_uuid);
@@ -84,7 +84,7 @@ export default class QuoteAccessToken {
     }
 
     static async findByUUID(uuid) {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quote_access_tokens")
             .select("*")
             .eq("uuid", uuid)
@@ -96,7 +96,7 @@ export default class QuoteAccessToken {
     }
 
     static async findOne(quote_uuid, token_hash){
-         const { data, error } = await supabase
+         const { data, error } = await supabase()
             .from("quote_access_tokens")
             .select("*")
             .eq("quote_uuid", quote_uuid)
@@ -111,7 +111,7 @@ export default class QuoteAccessToken {
 
     //hard delete
     static async revokeToken(tokenHash) {
-        const { error } = await supabase
+        const { error } = await supabase()
             .from("quote_access_tokens")
             .delete()
             .eq("token_hash", tokenHash);
@@ -122,7 +122,7 @@ export default class QuoteAccessToken {
     static async findValidToken({ quote_uuid, token_hash }) {
         const nowIso = new Date().toISOString();
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quote_access_tokens")
             .select("*")
             .eq("quote_uuid", quote_uuid)

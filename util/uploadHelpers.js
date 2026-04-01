@@ -1,5 +1,5 @@
 import path from "path";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 export const parseJSONField = (value, fallback = null) => {
   if (value == null || value === "") return fallback;
@@ -54,7 +54,7 @@ export const uploadImageToBucket = async ({
   const fileName = `${Date.now()}-${index + 1}-${safeBaseName}${ext}`;
   const filePath = `${folder}/${fileName}`;
 
-  const { error } = await supabase.storage.from(bucket).upload(filePath, file.buffer, {
+  const { error } = await supabase().storage.from(bucket).upload(filePath, file.buffer, {
     contentType: file.mimetype,
     upsert: false,
   });
@@ -63,7 +63,7 @@ export const uploadImageToBucket = async ({
     throw new Error(`Failed to upload image: ${error.message}`);
   }
 
-  const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+  const { data: publicUrlData } = supabase().storage.from(bucket).getPublicUrl(filePath);
 
   return {
     path: filePath,
@@ -81,7 +81,7 @@ export const removeUploadedFiles = async ({ bucket, files = [] }) => {
   const paths = files.map((file) => file?.path).filter(Boolean);
   if (!paths.length) return;
 
-  const { error } = await supabase.storage.from(bucket).remove(paths);
+  const { error } = await supabase().storage.from(bucket).remove(paths);
 
   if (error) {
     console.error("Failed to cleanup uploaded files:", error.message);

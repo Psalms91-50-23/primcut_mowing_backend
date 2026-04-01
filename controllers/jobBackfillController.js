@@ -1,11 +1,11 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 export const backfillJobAmountsFromQuotes = async (req, res) => {
   try {
     const { dryRun } = req.query;
     const isDryRun = String(dryRun || "").toLowerCase() === "true";
 
-    const { data: jobs, error: jobsError } = await supabase
+    const { data: jobs, error: jobsError } = await supabase()
       .from("jobs")
       .select(`
         id,
@@ -92,7 +92,7 @@ export const backfillJobAmountsFromQuotes = async (req, res) => {
     const failed = [];
 
     for (const item of updates) {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabase()
         .from("jobs")
         .update({
           subtotal_amount: item.subtotal_amount,

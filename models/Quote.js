@@ -1,27 +1,12 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import { buildSearchOr } from '../util/util.js';
-
-// function buildSearchOr(terms, columns) {
-//   const filters = [];
-
-//   for (const rawTerm of terms) {
-//     const term = String(rawTerm || "").trim().replace(/,/g, "");
-//     if (!term) continue;
-
-//     for (const column of columns) {
-//       filters.push(`${column}.ilike.%${term}%`);
-//     }
-//   }
-
-//   return filters.join(",");
-// }
 
 export default class Quote {
 
     static async findByCustomerUUID(customerUuid) {
         if (!customerUuid) return [];
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("quotes")
         .select(`
             uuid,
@@ -48,7 +33,7 @@ export default class Quote {
     }
 
     static async countSentQuotes() {
-        const { count, error } = await supabase
+        const { count, error } = await supabase()
             .from("quotes")
             .select("*", { count: "exact", head: true })
             .eq("status", "sent")
@@ -82,7 +67,7 @@ export default class Quote {
         // "status",
         ]);
 
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("quotes")
         .select(`
             uuid,
@@ -116,7 +101,7 @@ export default class Quote {
         const from = (pageNum - 1) * limitNum;
         const to = from + limitNum - 1;
 
-        let query = supabase
+        let query = supabase()
             .from("quotes")
             .select(
             `
@@ -182,7 +167,7 @@ export default class Quote {
 
     // Get all quotes
     static async findAll() {
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .select("*")
             .order("created_at", { ascending: true });
@@ -196,7 +181,7 @@ export default class Quote {
         if (!id) {
             throw new Error("Quote ID is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .select("*")
             .eq("id", id)
@@ -211,7 +196,7 @@ export default class Quote {
         if (!uuid) {
             throw new Error("Quote UUID is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .select("*")
             .eq("uuid", uuid)
@@ -228,7 +213,7 @@ export default class Quote {
         if (!quote) {
             throw new Error("Quote data is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .insert([quote])
             .select('*')
@@ -254,7 +239,7 @@ export default class Quote {
         if (Object.keys(updates).length === 0) {
             throw new Error("Updates object cannot be empty");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({
                 ...updates,
@@ -283,7 +268,7 @@ export default class Quote {
         if (Object.keys(updates).length === 0) {
             throw new Error("Updates object cannot be empty");
   }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({
                 ...updates,
@@ -297,46 +282,12 @@ export default class Quote {
         return data;
     }
 
-    // static async hardDelete(uuid) {
-    //     if (!uuid) {
-    //     throw new Error("Quote UUID is required");
-    //     }
-
-    //     // Fetch the quote first to verify existence
-    //     const { data: quote, error: fetchError } = await supabase
-    //         .from('quotes')
-    //         .select('*')
-    //         .eq('uuid', uuid)
-    //         .maybeSingle(); // read only, existence check
-
-    //     if (fetchError) {
-    //         throw new Error(`Error fetching quote ${uuid}: ${fetchError.message}`);
-    //     }
-
-    //     if (!quote) {
-    //         throw new Error(`Quote with UUID ${uuid} not found`);
-    //     }
-
-    //     // Perform the hard delete
-    //     const { data, error } = await supabase
-    //         .from('quotes')
-    //         .delete()
-    //         .eq('uuid', uuid)
-    //         .select("*") 
-    //         .single(); 
-
-    //     if (error) {
-    //         throw new Error(`Error deleting quote ${uuid}: ${error.message}`);
-    //     }
-    //         console.info(`Quote ${uuid} hard-deleted at ${new Date().toISOString()}`);
-    //     return data; 
-    // }
-
+    
     static async hardDelete(uuid) {
         if (!uuid) throw new Error("Quote UUID is required");
 
         // Fetch the quote first (so we can delete images)
-        const { data: quote, error: fetchError } = await supabase
+        const { data: quote, error: fetchError } = await supabase()
             .from("quotes")
             .select("*")
             .eq("uuid", uuid)
@@ -361,7 +312,7 @@ export default class Quote {
         await Job.deleteByQuoteUUID(uuid);
 
         // 3) DELETE THE QUOTE ROW
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .delete()
             .eq("uuid", uuid)
@@ -375,26 +326,6 @@ export default class Quote {
     }
     
     // Soft delete (set deleted_at)
-    // static async softDelete(uuid) {
-    //     if (!uuid) {
-    //         throw new Error("Quote UUID is required");
-    //     }
-    //     const now = new Date().toISOString();
-    //     const { data, error } = await supabase
-    //         .from("quotes")
-    //         .update({ 
-    //             deleted_at: now, 
-    //             is_active: false, 
-    //             is_deleted: true, 
-    //             updated_at: now, 
-    //             status: "rejected" })
-    //         .eq("uuid", uuid)
-    //         .select("*")
-    //         .single();
-
-    //     if (error) throw new Error(`Error soft deleting quote: ${error.message}`);
-    //     return data;
-    // }
     
     static async softDelete(uuid) {
         if (!uuid) throw new Error("Quote UUID is required");
@@ -402,7 +333,7 @@ export default class Quote {
         const now = new Date().toISOString();
 
         // Fetch quote status so we can store previous_status
-        const { data: quote, error: quoteFetchErr } = await supabase
+        const { data: quote, error: quoteFetchErr } = await supabase()
             .from("quotes")
             .select("status,is_deleted")
             .eq("uuid", uuid)
@@ -415,7 +346,7 @@ export default class Quote {
         if (quote.is_deleted) return quote;
 
         // 0) Find jobs for this quote (usually 0 or 1)
-        const { data: jobs, error: jobsFetchErr } = await supabase
+        const { data: jobs, error: jobsFetchErr } = await supabase()
             .from("jobs")
             .select("uuid,status,is_deleted")
             .eq("quote_uuid", uuid);
@@ -429,7 +360,7 @@ export default class Quote {
 
         // 1) Soft-delete recurrences for those jobs (safe even if none exist)
         if (jobUuids.length > 0) {
-            const { error: recErr } = await supabase
+            const { error: recErr } = await supabase()
             .from("job_recurrences")
             .update({
                 deleted_at: now,
@@ -446,7 +377,7 @@ export default class Quote {
 
         // 2) Soft-delete jobs (per job so we can store previous_status accurately)
         for (const job of activeJobs) {
-            const { error: oneJobErr } = await supabase
+            const { error: oneJobErr } = await supabase()
             .from("jobs")
             .update({
                 previous_status: job.status,
@@ -465,7 +396,7 @@ export default class Quote {
         }
 
         // 3) Soft-delete quote + store previous_status
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({
             previous_status: quote.status,
@@ -490,7 +421,7 @@ export default class Quote {
         const now = new Date().toISOString();
 
         // 0) Fetch quote previous_status (so we know what to restore to)
-        const { data: quoteRow, error: quoteFetchErr } = await supabase
+        const { data: quoteRow, error: quoteFetchErr } = await supabase()
             .from("quotes")
             .select("previous_status,status,is_deleted")
             .eq("uuid", uuid)
@@ -507,7 +438,7 @@ export default class Quote {
         const restoredQuoteStatus = quoteRow.previous_status || "draft";
 
         // 1) Find jobs for this quote (usually 0 or 1)
-        const { data: jobs, error: jobsFetchErr } = await supabase
+        const { data: jobs, error: jobsFetchErr } = await supabase()
             .from("jobs")
             .select("uuid,previous_status,status,is_deleted")
             .eq("quote_uuid", uuid);
@@ -520,13 +451,13 @@ export default class Quote {
 
         // 2) Restore job recurrences first (safe even if none exist)
         if (jobUuids.length > 0) {
-            const { error: recErr } = await supabase
+            const { error: recErr } = await supabase()
             .from("job_recurrences")
             .update({
                 deleted_at: null,
                 is_deleted: false,
                 // Restore status from previous_status if available, otherwise leave as-is
-                // (We can't do "status = previous_status" in a single query via supabase-js)
+                // (We can't do "status = previous_status" in a single query via supabase()-js)
                 // We'll handle correct per-row restore below if you want true restore.
                 updated_at: now, // only if you have updated_at on job_recurrences; if not, remove this line
             })
@@ -545,7 +476,7 @@ export default class Quote {
         // If you want recurrences to return to their exact prior status, uncomment this block.
         
         if (jobUuids.length > 0) {
-            const { data: occs, error: occFetchErr } = await supabase
+            const { data: occs, error: occFetchErr } = await supabase()
             .from("job_recurrences")
             .select("id,previous_status")
             .in("job_uuid", jobUuids)
@@ -564,7 +495,7 @@ export default class Quote {
             }));
 
             if (updates.length > 0) {
-            const { error: occUpdateErr } = await supabase
+            const { error: occUpdateErr } = await supabase()
                 .from("job_recurrences")
                 .upsert(updates, { onConflict: "id" });
 
@@ -580,7 +511,7 @@ export default class Quote {
         for (const job of jobs || []) {
             const restoredJobStatus = job.previous_status || "pending";
 
-            const { error: jobRestoreErr } = await supabase
+            const { error: jobRestoreErr } = await supabase()
             .from("jobs")
             .update({
                 deleted_at: null,
@@ -598,7 +529,7 @@ export default class Quote {
         }
 
         // 4) Restore quote
-        const { data: restoredQuote, error: quoteRestoreErr } = await supabase
+        const { data: restoredQuote, error: quoteRestoreErr } = await supabase()
             .from("quotes")
             .update({
             deleted_at: null,
@@ -625,7 +556,7 @@ export default class Quote {
         if (!uuid) {
             throw new Error("Quote UUID is required");
         }
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({ deleted_at: null })
             .eq("uuid", uuid)
@@ -641,7 +572,7 @@ export default class Quote {
             throw new Error("Quote UUID is required");
         }
         const now = new Date().toISOString();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
         .from("quotes")
         .update({ 
             status: 'accepted', 
@@ -667,7 +598,7 @@ export default class Quote {
 
     static async rejectQuote(uuid) {
         const now = new Date().toISOString();
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({ status: 'rejected', updated_at: now, is_active: false, responded_at: now })
             .eq("uuid", uuid)
@@ -694,7 +625,7 @@ export default class Quote {
             throw new Error("Either newDate or addDays must be provided");
         }
         // Fetch the current quote first
-        const { data: quote, error: fetchError } = await supabase
+        const { data: quote, error: fetchError } = await supabase()
             .from("quotes")
             .select("*")
             .eq("uuid", uuid)
@@ -724,7 +655,7 @@ export default class Quote {
         const updatedAt = new Date().toISOString();
 
         // Update the quote
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({
             expiry_end: newExpiryISO,
@@ -756,7 +687,7 @@ export default class Quote {
             .filter(Boolean);
 
         // Attempt deletion
-        const { error } = await supabase.storage
+        const { error } = await supabase().storage
             .from("quote-images")
             .remove(filePaths);
 
@@ -784,7 +715,7 @@ export default class Quote {
      * - Not already responded
      * - Expiry time passed
      */
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from("quotes")
             .update({
                 status: "expired",
@@ -813,89 +744,11 @@ export default class Quote {
         return data;
     }
 
-    // static async dispatchQuote(uuid, payload, pdfBuffer) {
-    //     if (!uuid) throw new Error("Quote UUID is required");
-
-    //     const { data, error } = await supabase
-    //         .from("quotes")
-    //         .update({
-    //         ...payload,
-    //         quote_pdf_version: (payload.quote_pdf_version || 0) + 1,
-    //         quote_sent_at: new Date().toISOString(),
-    //         is_quote_sent_to_client: true,
-    //         status: "sent",
-    //         updated_at: new Date().toISOString()
-    //         })
-    //         .eq("uuid", uuid)
-    //         .select("*")
-    //         .single();
-
-    //     if (error) throw new Error(error.message);
-
-    //     return data;
-    // }
-
-    //original
-    // static async dispatchQuote(uuid, payload, pdfBuffer) {
-    //     if (!uuid) throw new Error("Quote UUID is required");
-    //     if (!pdfBuffer) throw new Error("PDF buffer is required");
-
-    //     // 1) Get current quote to determine next version
-    //     const { data: existing, error: fetchError } = await supabase
-    //         .from("quotes")
-    //         .select("uuid, quote_pdf_version")
-    //         .eq("uuid", uuid)
-    //         .single();
-
-    //     if (fetchError) throw new Error(fetchError.message);
-    //     if (!existing) throw new Error("Quote not found");
-
-    //     const currentVersion = Number(existing.quote_pdf_version ?? 1);
-    //     const nextVersion = currentVersion + 1;
-
-    //     // 2) Upload PDF to storage
-    //     const filePath = `quotes/${uuid}/quote-v${nextVersion}.pdf`;
-
-    //     const { error: uploadError } = await supabase.storage
-    //         .from("quotes-pdf")
-    //         .upload(filePath, pdfBuffer, {
-    //         contentType: "application/pdf",
-    //         upsert: true
-    //         });
-
-    //     if (uploadError) throw new Error(uploadError.message);
-
-    //     // 3) Store PATH (recommended). If you want URL instead, see note below.
-    //     const quote_pdf_url = filePath;
-
-    //     // 4) Update quote record
-    //     const { data: updated, error: updateError } = await supabase
-    //         .from("quotes")
-    //         .update({
-    //         ...payload,
-    //         quote_pdf_url,
-    //         quote_pdf_version: nextVersion,
-    //         quote_sent_at: new Date().toISOString(),
-    //         is_quote_sent_to_client: true,
-    //         status: "sent",
-    //         updated_at: new Date().toISOString()
-    //         })
-    //         .eq("uuid", uuid)
-    //         .select("*")
-    //         .single();
-
-    //     if (updateError) throw new Error(updateError.message);
-
-    //     // Optional: return filePath too if you want rollback deletion support
-    //     // return updated;
-    //     return { updated, filePath };
-    // }
-
     static async dispatchQuote(uuid, payload, pdfBuffer) {
         if (!uuid) throw new Error("Quote UUID is required");
         if (!pdfBuffer) throw new Error("PDF buffer is required");
 
-        const { data: existing, error: fetchError } = await supabase
+        const { data: existing, error: fetchError } = await supabase()
             .from("quotes")
             .select("uuid, quote_pdf_version")
             .eq("uuid", uuid)
@@ -909,7 +762,7 @@ export default class Quote {
 
         const filePath = `quotes/${uuid}/quote-v${nextVersion}.pdf`;
 
-        const { error: uploadError } = await supabase.storage
+        const { error: uploadError } = await supabase().storage
             .from("quotes-pdf")
             .upload(filePath, pdfBuffer, {
             contentType: "application/pdf",
@@ -920,7 +773,7 @@ export default class Quote {
         // store only storage path in DB
         const quote_pdf_url = filePath;
 
-        const { data: updated, error: updateError } = await supabase
+        const { data: updated, error: updateError } = await supabase()
             .from("quotes")
             .update({
             ...payload,
@@ -936,7 +789,7 @@ export default class Quote {
             .single();
 
         if (updateError) throw new Error(updateError.message);
-        const { data: publicUrlData } = supabase.storage
+        const { data: publicUrlData } = supabase().storage
             .from("quotes-pdf")
             .getPublicUrl(filePath);
             
@@ -967,7 +820,7 @@ export default class Quote {
       "address",
     ].join(",");
 
-    const { data: quote, error: quoteErr } = await supabase
+    const { data: quote, error: quoteErr } = await supabase()
       .from("quotes")
       .select(quoteSelect)
       .eq("uuid", uuid)
@@ -978,7 +831,7 @@ export default class Quote {
     if (!quote) return null;
 
     // Your DB enforces unique_job_per_quote, so this is max 1 row.
-    const { data: job, error: jobErr } = await supabase
+    const { data: job, error: jobErr } = await supabase()
       .from("jobs")
       .select("uuid,is_recurring")
       .eq("quote_uuid", uuid)
@@ -990,7 +843,7 @@ export default class Quote {
     let recurrence_count = 0;
 
     if (job?.uuid) {
-      const { count, error: recErr } = await supabase
+      const { count, error: recErr } = await supabase()
         .from("job_recurrences")
         .select("id", { count: "exact", head: true })
         .eq("job_uuid", job.uuid)
@@ -1024,7 +877,7 @@ export default class Quote {
         if (!uuid) throw new Error("Quote UUID is required");
 
         // If you want to avoid pulling massive jsonb for details, replace "*" with explicit columns.
-        const { data: quote, error: quoteErr } = await supabase
+        const { data: quote, error: quoteErr } = await supabase()
         .from("quotes")
         .select("*")
         .eq("uuid", uuid)
@@ -1035,7 +888,7 @@ export default class Quote {
         if (!quote) return null;
 
         // linked job (0 or 1 because unique_job_per_quote)
-        const { data: job, error: jobErr } = await supabase
+        const { data: job, error: jobErr } = await supabase()
         .from("jobs")
         .select("*")
         .eq("quote_uuid", uuid)
@@ -1053,7 +906,7 @@ export default class Quote {
         }
 
         // fetch recurrences for that job
-        const { data: recs, error: recErr } = await supabase
+        const { data: recs, error: recErr } = await supabase()
         .from("job_recurrences")
         .select("*")
         .eq("job_uuid", job.uuid)

@@ -1,12 +1,12 @@
 // controllers/quotePdf.controller.js
-import supabase from "../config/db.js"; // your server supabase client (service role recommended)
+import { supabase } from "../config/db.js"; // your server supabase() client (service role recommended)
 import Quote from "../models/Quote.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import { hashToken } from "../util/util.js";
 
 /**
  * GET /api/quotes/:uuid/pdf?token=RAW_TOKEN
- * Streams the stored quote PDF from Supabase Storage AFTER validating the quote access token.
+ * Streams the stored quote PDF from Supabase() Storage AFTER validating the quote access token.
  *
  * Notes:
  * - Keep your "quotes-pdf" bucket PRIVATE.
@@ -49,17 +49,17 @@ export const viewQuotePdf = async (req, res) => {
       return res.status(404).json({ message: "Quote PDF not available" }); 
     }
 
-    // 4) Download from Supabase Storage (server-side)
-    const { data, error } = await supabase.storage
+    // 4) Download from Supabase() Storage (server-side)
+    const { data, error } = await supabase().storage
       .from("quotes-pdf")
       .download(pdfPath);
 
     if (error) {
-      console.error("Supabase download error:", error);
+      console.error("Supabase() download error:", error);
       return res.status(500).json({ message: "Failed to load PDF" });
     }
 
-    // supabase-js returns a Blob in many environments; convert to Buffer for Node
+    // supabase()-js returns a Blob in many environments; convert to Buffer for Node
     const arrayBuffer = await data.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 

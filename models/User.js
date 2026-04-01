@@ -1,10 +1,10 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 
 class User {
 
   // Get all non-deleted users
   static async findAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .is('deleted_at', null)
@@ -15,7 +15,7 @@ class User {
   }
 
   static async findAllIncludingDeleted() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .order('created_at', { ascending: true });
@@ -26,7 +26,7 @@ class User {
 
   // Find user by internal UUID
   static async findByUUID(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .eq('uuid', uuid)
@@ -39,7 +39,7 @@ class User {
   }
 
   static async findByUUIDIncludingDeleted(uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .eq('uuid', uuid)
@@ -49,9 +49,9 @@ class User {
     return data;
   }
 
-  // Find user by Supabase Auth ID
+  // Find user by Supabase() Auth ID
   static async findByAuthID(auth_user_id) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .eq('auth_user_id', auth_user_id)
@@ -63,7 +63,7 @@ class User {
   }
 
   static async findByAuthUserId(authUserId) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .eq('auth_user_id', authUserId)
@@ -78,7 +78,7 @@ class User {
   static async findByEmail(email) {
     console.log({email})
     const normalizedEmail = email?.trim().toLowerCase();
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .select('*')
       .eq('email', normalizedEmail)
@@ -93,7 +93,7 @@ class User {
   // Create a new user (register)
   static async create({ auth_user_id, email, first_name, last_name, role = 'customer', customer_uuid = null, uuid }) {
       const now = new Date().toISOString();
-      const { data, error } = await supabase
+      const { data, error } = await supabase()
         .from('users')
         .insert([{
           uuid,
@@ -118,7 +118,7 @@ class User {
    // Mark user as verified (app-specific)
   static async markVerified(auth_user_id) {
     // const now = new Date().toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .update({
         email_verified_at: new Date().toISOString(),
@@ -136,7 +136,7 @@ class User {
   
   // Update user fields by UUID
   static async updateByUUID(uuid, updates) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from('users')
       .update({
         ...updates,
@@ -152,7 +152,7 @@ class User {
 
   // Soft delete
   static async softDelete(uuid) {
-    const { error } = await supabase
+    const { error } = await supabase()
       .from('users')
       .update({ deleted_at: new Date().toISOString() })
       .eq('uuid', uuid);
@@ -166,11 +166,11 @@ class User {
         const user = await this.findByUUID(uuid);
         if (!user) throw new Error("User not found");
 
-        // 2️⃣ Delete from Supabase Auth
-        await supabase.auth.admin.deleteUser(user.auth_user_id);
+        // 2️⃣ Delete from Supabase() Auth
+        await supabase().auth.admin.deleteUser(user.auth_user_id);
 
         // 3️⃣ Delete from local table
-        const { data, error } = await supabase
+        const { data, error } = await supabase()
             .from('users')
             .delete()
             .eq('uuid', uuid)
@@ -183,7 +183,7 @@ class User {
     }
 
     static async hardDeleteLocalTable(uuid) {
-      const { data, error } = await supabase
+      const { data, error } = await supabase()
         .from('users')
         .delete()
         .eq('uuid', uuid)

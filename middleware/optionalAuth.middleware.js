@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import User from "../models/User.js";
 
 export async function optionalAuth(req, res, next) {
@@ -13,7 +13,7 @@ export async function optionalAuth(req, res, next) {
 
     if (!decoded || decoded.exp <= now) return next();
 
-    const { data, error } = await supabase.auth.getUser(accessToken);
+    const { data, error } = await supabase().auth.getUser(accessToken);
 
     if (!error && data?.user) {
       const localUser = await User.findByAuthID(data.user.id);

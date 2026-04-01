@@ -1,39 +1,13 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 const TERMS_BUCKET = "terms-and-conditions";
-
-// export const uploadTermsPDFBuffer = async ({ 
-//     buffer, 
-//     filePath, 
-//     contentType = "application/pdf" }) => {
-
-//   const { error } = await supabase.storage
-//     .from(TERMS_BUCKET)
-//     .upload(filePath, buffer, {
-//       contentType,
-//       upsert: true,
-//     });
-
-//   if (error) {
-//     throw new Error(`Failed to upload terms PDF: ${error.message}`);
-//   }
-
-//   const { data: publicUrlData } = supabase.storage
-//     .from(TERMS_BUCKET)
-//     .getPublicUrl(filePath);
-
-//   return {
-//     storagePath: filePath,
-//     publicUrl: publicUrlData?.publicUrl || null,
-//   };
-// };
 
 export const uploadTermsPDFBuffer = async ({
   buffer,
   filePath,
   contentType = "application/pdf",
 }) => {
-  const { error } = await supabase.storage
+  const { error } = await supabase()().storage
     .from(TERMS_BUCKET)
     .upload(filePath, buffer, {
       contentType,
@@ -44,7 +18,7 @@ export const uploadTermsPDFBuffer = async ({
     throw new Error(`Failed to upload terms PDF: ${error.message}`);
   }
 
-  const { data: publicUrlData } = supabase.storage
+  const { data: publicUrlData } = supabase()().storage
     .from(TERMS_BUCKET)
     .getPublicUrl(filePath);
 
@@ -55,7 +29,7 @@ export const uploadTermsPDFBuffer = async ({
 };
 
 export const downloadTermsPDFBuffer = async (filePath) => {
-  const { data, error } = await supabase.storage
+  const { data, error } = await supabase().storage
     .from(TERMS_BUCKET)
     .download(filePath);
 
@@ -71,7 +45,7 @@ export const downloadStorageFileBuffer = async (bucket, filePath) => {
   if (!bucket) throw new Error("Bucket is required");
   if (!filePath) throw new Error("File path is required");
 
-  const { data, error } = await supabase.storage
+  const { data, error } = await supabase().storage
     .from(bucket)
     .download(filePath);
 
@@ -86,7 +60,7 @@ export const downloadStorageFileBuffer = async (bucket, filePath) => {
 export const deleteTermsPDF = async (filePath) => {
   if (!filePath) return;
 
-  const { error } = await supabase.storage
+  const { error } = await supabase().storage
     .from(TERMS_BUCKET)
     .remove([filePath]);
 

@@ -1,4 +1,4 @@
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 
 export const getQuotePdfPublicUrl = async (quotePdfUrl) => {
   if (!quotePdfUrl || typeof quotePdfUrl !== "string") return null;
@@ -10,7 +10,7 @@ export const getQuotePdfPublicUrl = async (quotePdfUrl) => {
     return quotePdfUrl;
   }
 
-  const { data } = supabase.storage
+  const { data } = supabase().storage
     .from("quotes-pdf")
     .getPublicUrl(quotePdfUrl);
 

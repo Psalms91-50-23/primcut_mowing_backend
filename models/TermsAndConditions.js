@@ -1,5 +1,5 @@
-import supabase from '../config/db.js';
-
+import { supabase } from '../config/db.js';
+// import { createClient } from "@supabase()/supabase()-js";
 /**
  * TermsAndConditions Model
  *
@@ -97,7 +97,7 @@ class TermsAndConditions {
       payload.effective_date = effective_date;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .insert([payload])
       .select("*")
@@ -150,7 +150,7 @@ class TermsAndConditions {
   //     created_at: now,
   //   };
 
-  //   const { data, error } = await supabase
+  //   const { data, error } = await supabase()
   //     .from(this.tableName)
   //     .insert([payload])
   //     .select("*")
@@ -163,8 +163,23 @@ class TermsAndConditions {
   //   return data;
   // }
 
+  static async findActive() {
+
+    const { data, error } = await supabase()
+      .from(this.tableName)
+      .select("*")
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throw new Error(`Error fetching active terms and conditions: ${error.message}`);
+    }
+
+    return data?.[0] || null;
+  }
+
   static async findAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .order("created_at", { ascending: false });
@@ -176,28 +191,44 @@ class TermsAndConditions {
     return data || [];
   }
 
-  static async findActive() {
-    const { data, error } = await supabase
-      .from(this.tableName)
-      .select("*")
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  // static async findActive() {
+  //   const { data, error } = await supabase()
+  //     .from(this.tableName)
+  //     .select("*")
+  //     .eq("is_active", true)
+  //     .order("updated_at", { ascending: false })
+  //     .limit(1)
+  //     .maybeSingle();
 
-    if (error) {
-      throw new Error(`Error fetching active terms and conditions: ${error.message}`);
-    }
+  //   if (error) {
+  //     throw new Error(`Error fetching active terms and conditions: ${error.message}`);
+  //   }
 
-    return data || null;
-  }
+  //   return data || null;
+  // }
+  // static async findActive() {
+  //   const { data, error } = await supabase()
+  //     .from(this.tableName)
+  //     .select("*")
+  //     .eq("is_active", true)
+  //     .order("updated_at", { ascending: false });
+
+  //   console.log("findActive rows:", data);
+  //   console.log("findActive error:", error);
+
+  //   if (error) {
+  //     throw new Error(`Error fetching active terms and conditions: ${error.message}`);
+  //   }
+
+  //   return data?.[0] || null;
+  // }
 
   static async findByUUID(uuid) {
     if (!uuid) {
       throw new Error("Terms and conditions UUID is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("uuid", uuid)
@@ -215,7 +246,7 @@ class TermsAndConditions {
       throw new Error("Version is required");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .select("*")
       .eq("version", version)
@@ -267,7 +298,7 @@ class TermsAndConditions {
       throw new Error("No valid fields provided for update");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .update(updatePayload)
       .eq("uuid", uuid)
@@ -291,7 +322,7 @@ class TermsAndConditions {
       throw new Error("Terms and conditions not found");
     }
 
-    const { error: clearError } = await supabase
+    const { error: clearError } = await supabase()
       .from(this.tableName)
       .update({
         is_active: false,
@@ -302,7 +333,7 @@ class TermsAndConditions {
       throw new Error(`Error clearing previous active terms: ${clearError.message}`);
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .update({
         is_active: true,
@@ -328,7 +359,7 @@ class TermsAndConditions {
       return null;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from(this.tableName)
       .delete()
       .eq("uuid", uuid)

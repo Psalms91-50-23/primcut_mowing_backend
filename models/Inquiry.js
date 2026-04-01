@@ -1,4 +1,4 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 
 export default class Inquiry {
 
@@ -16,7 +16,7 @@ export default class Inquiry {
       status = "new",
     } = data;
 
-    const { data: inquiry, error } = await supabase
+    const { data: inquiry, error } = await supabase()
       .from("inquiries")
       .insert([
         {
@@ -40,7 +40,7 @@ export default class Inquiry {
 
   static async findByUUID(uuid) {
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiries")
       .select("*")
       .eq("uuid", uuid)
@@ -51,7 +51,7 @@ export default class Inquiry {
   }
 
   // static async findByUUID(uuid) {
-  //   const { data, error } = await supabase
+  //   const { data, error } = await supabase()
   //     .from("inquiries")
   //     .select("*")
   //     .eq("uuid", uuid)
@@ -66,7 +66,7 @@ export default class Inquiry {
   // }
 
   static async getAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiries")
       .select("*")
       .order("created_at", { ascending: false });
@@ -76,7 +76,7 @@ export default class Inquiry {
   }
 
   static async getAllByCustomerUUID(customer_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiries")
       .select(`
         uuid,
@@ -97,7 +97,7 @@ export default class Inquiry {
   }
 
   static async findCustomerInquiryByUUID(customer_uuid, inquiry_uuid) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiries")
       .select(`
         uuid,
@@ -123,7 +123,7 @@ export default class Inquiry {
   }
 
   // static async updateByUUID(uuid, updates) {
-  //   const { data, error } = await supabase
+  //   const { data, error } = await supabase()
   //     .from("inquiries")
   //     .update(updates)
   //     .eq("uuid", uuid)
@@ -135,7 +135,7 @@ export default class Inquiry {
   // }
 
   static async updateByUUID(uuid, updates) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("inquiries")
       .update(updates)
       .eq("uuid", uuid)
@@ -147,7 +147,7 @@ export default class Inquiry {
   }
 
   static async deleteByUUID(uuid) {
-    const { error } = await supabase
+    const { error } = await supabase()
       .from("inquiries")
       .delete()
       .eq("uuid", uuid);

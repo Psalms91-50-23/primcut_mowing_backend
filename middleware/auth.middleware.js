@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import supabase from '../config/db.js';
+import { supabase } from '../config/db.js';
 import User from '../models/User.js'; 
 
 export async function requireAuth(req, res, next) {
@@ -15,7 +15,7 @@ export async function requireAuth(req, res, next) {
       const decoded = jwt.decode(accessToken);
 
       if (decoded && decoded.exp > now) {
-        const { data, error } = await supabase.auth.getUser(accessToken);
+        const { data, error } = await supabase().auth.getUser(accessToken);
 
         if (!error && data?.user) {
           supabaseUser = data.user;
@@ -102,7 +102,7 @@ export async function requireAuth(req, res, next) {
         user_metadata: supabaseUser.user_metadata,
       },
     };
-    console.log(req.user, " in middle ware auth")
+    // console.log(req.user, " in middle ware auth")
     next();
   } catch (err) {
     console.error("requireAuth error:", err);
