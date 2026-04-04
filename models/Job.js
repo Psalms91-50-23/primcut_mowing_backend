@@ -1,5 +1,5 @@
 import { supabase } from '../config/db.js';
-import { normalizeNZPhone, generatePrefixedId, obfuscatePhoneNumber, obfuscateName, obfuscateEmail, obfuscateAddress } from "../util/util.js";
+import { obfuscateName, obfuscateAddress } from "../util/util.js";
 import crypto from "crypto";
 import { buildSearchOr, clampInt } from '../util/util.js';
 
@@ -599,24 +599,29 @@ export default class Job {
         if (error) throw new Error(`Error fetching job with quote UUID ${quote_uuid}: ${error.message}`);
         return data;
     }
+    static async list({ status, limit = 5, page = 1, olderThanDays = null }) {
+    const safeLimit = clampInt(limit, 5, 1, 50);
+    const safePage = clampInt(page, 1, 1, 999999);
 
-    static async list({ status, limit = 5, page = 1, olderThanDays = 30 }) {
-        const safeLimit = clampInt(limit, 5, 1, 50);
-        const safePage = clampInt(page, 1, 1, 999999);
-        const safeOlder = clampInt(olderThanDays, 30, 0, 3650);
+    const hasOlderThanFilter =
+        olderThanDays !== null &&
+        olderThanDays !== undefined &&
+        olderThanDays !== "" &&
+        !Number.isNaN(Number(olderThanDays));
 
-        const from = (safePage - 1) * safeLimit;
-        const to = from + safeLimit - 1;
+    const safeOlder = hasOlderThanFilter
+        ? clampInt(olderThanDays, 30, 0, 3650)
+        : null;
 
-        const olderThanIso =
-        safeOlder > 0
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
+    const olderThanIso =
+        safeOlder !== null && safeOlder > 0
             ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
             : null;
 
-        // ✅ jobs.* and nested job_recurrences (filtered client-side to non-deleted)
-        // Supabase() doesn't support filtering nested selects super cleanly without RPC,
-        // so we fetch them and filter in JS.
-        let q = supabase()
+    let q = supabase()
         .from("jobs")
         .select(
             `
@@ -635,29 +640,93 @@ export default class Job {
         .eq("is_deleted", false)
         .order("created_at", { ascending: false });
 
-        if (status) q = q.eq("status", status);
-        if (olderThanIso) q = q.lte("created_at", olderThanIso);
-
-        const { data, error, count } = await q.range(from, to);
-        if (error) throw new Error(error.message);
-
-        // ✅ Filter out deleted recurrences in JS
-        const jobs = (data || []).map((job) => ({
-        ...job,
-        job_recurrences: (job.job_recurrences || []).filter((r) => r.is_deleted === false),
-        }));
-
-        const totalCount = count || 0;
-        const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
-
-        return {
-            jobs,
-            page: safePage,
-            totalPages,
-            totalCount,
-            limit: safeLimit,
-        };
+    if (status && typeof status === "string" && status.trim()) {
+        q = q.eq("status", status.trim());
     }
+
+    if (olderThanIso) {
+        q = q.lte("created_at", olderThanIso);
+    }
+
+    const { data, error, count } = await q.range(from, to);
+    if (error) throw new Error(error.message);
+
+    const jobs = (data || []).map((job) => ({
+        ...job,
+        job_recurrences: (job.job_recurrences || []).filter(
+            (r) => r.is_deleted === false
+        ),
+    }));
+
+    const totalCount = count || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+
+    return {
+        jobs,
+        page: safePage,
+        totalPages,
+        totalCount,
+        limit: safeLimit,
+    };
+}
+    // static async list({ status, limit = 5, page = 1, olderThanDays = 30 }) {
+    //     const safeLimit = clampInt(limit, 5, 1, 50);
+    //     const safePage = clampInt(page, 1, 1, 999999);
+    //     const safeOlder = clampInt(olderThanDays, 30, 0, 3650);
+
+    //     const from = (safePage - 1) * safeLimit;
+    //     const to = from + safeLimit - 1;
+
+    //     const olderThanIso =
+    //     safeOlder > 0
+    //         ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
+    //         : null;
+
+    //     // ✅ jobs.* and nested job_recurrences (filtered client-side to non-deleted)
+    //     // Supabase() doesn't support filtering nested selects super cleanly without RPC,
+    //     // so we fetch them and filter in JS.
+    //     let q = supabase()
+    //     .from("jobs")
+    //     .select(
+    //         `
+    //         *,
+    //         quote:quotes (
+    //             uuid,
+    //             contact_first_name,
+    //             contact_last_name
+    //         ),
+    //         job_recurrences:job_recurrences (
+    //             *
+    //         )
+    //         `,
+    //         { count: "exact" }
+    //     )
+    //     .eq("is_deleted", false)
+    //     .order("created_at", { ascending: false });
+
+    //     if (status) q = q.eq("status", status);
+    //     if (olderThanIso) q = q.lte("created_at", olderThanIso);
+
+    //     const { data, error, count } = await q.range(from, to);
+    //     if (error) throw new Error(error.message);
+
+    //     // ✅ Filter out deleted recurrences in JS
+    //     const jobs = (data || []).map((job) => ({
+    //     ...job,
+    //     job_recurrences: (job.job_recurrences || []).filter((r) => r.is_deleted === false),
+    //     }));
+
+    //     const totalCount = count || 0;
+    //     const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+
+    //     return {
+    //         jobs,
+    //         page: safePage,
+    //         totalPages,
+    //         totalCount,
+    //         limit: safeLimit,
+    //     };
+    // }
 
     // Backfill jobs.job_address from quotes.address for jobs where job_address is null
     static async backfillJobAddressesFromQuotes() {

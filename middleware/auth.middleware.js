@@ -29,7 +29,7 @@ export async function requireAuth(req, res, next) {
       }
 
       const { data: refreshData, error: refreshError } =
-        await supabase.auth.refreshSession({
+        await supabase().auth.refreshSession({
           refresh_token: refreshToken,
         });
 

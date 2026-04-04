@@ -7,7 +7,8 @@ import {
   deleteInquiryByUUID,
   getMyInquiries,
   getMyInquiryByUUID,
-  createInquiryReply
+  createInquiryReply,
+  getInquiries
 } from "../controllers/InquiryController.js";
 
 import { requireAuth } from '../middleware/auth.middleware.js';
@@ -24,10 +25,13 @@ const router = express.Router();
 // Public or authenticated submit
 router.post("/create", publicRateLimit, optionalAuth, createInquiry);
 
+router.get("/", getInquiries);
+router.get("/all", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getAllInquiries);
+
+router.get("/:uuid", getInquiryByUUID);
 // Staff only
-router.get("/", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getAllInquiries);
 // router.get("/:uuid", getInquiryByUUID);
-router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee", "customer"]), getInquiryByUUID);
+// router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee", "customer"]), getInquiryByUUID);
 
 router.patch("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), updateInquiryByUUID);
 

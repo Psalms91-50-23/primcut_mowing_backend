@@ -75,8 +75,8 @@ router.get("/customer/uuid/:uuid", authenticatedRateLimit, requireAuth, requireR
 //original incase we need it at bottom
 
 // GET quote by customer UUID
-router.get("/customer/:uuid", getQuotesByCustomerUUID);
-// router.get("/customer/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuotesByCustomerUUID);
+// router.get("/customer/:uuid", getQuotesByCustomerUUID);
+router.get("/customer/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuotesByCustomerUUID);
 
 //Auto update quote status to expired
 router.patch("/public/customer/uuid/:uuid", publicRateLimit,  autoExpireQuote);

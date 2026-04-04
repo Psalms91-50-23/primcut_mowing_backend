@@ -7,7 +7,7 @@ export const uploadTermsPDFBuffer = async ({
   filePath,
   contentType = "application/pdf",
 }) => {
-  const { error } = await supabase()().storage
+  const { error } = await supabase().storage
     .from(TERMS_BUCKET)
     .upload(filePath, buffer, {
       contentType,
@@ -18,7 +18,7 @@ export const uploadTermsPDFBuffer = async ({
     throw new Error(`Failed to upload terms PDF: ${error.message}`);
   }
 
-  const { data: publicUrlData } = supabase()().storage
+  const { data: publicUrlData } = supabase().storage
     .from(TERMS_BUCKET)
     .getPublicUrl(filePath);
 

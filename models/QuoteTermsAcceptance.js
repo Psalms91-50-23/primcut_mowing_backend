@@ -1,7 +1,7 @@
-import crypto from "crypto";
+
 import { supabase } from "../config/db.js";
 
-class QuoteTermsAcceptance {
+export default class QuoteTermsAcceptance {
 
   static async create(payload) {
     if (!payload) {
@@ -165,5 +165,3 @@ class QuoteTermsAcceptance {
   }
 
 }
-
-export default QuoteTermsAcceptance;

@@ -245,8 +245,7 @@ export const registerUser = async (req, res) => {
       error: err.message || "Failed to register user",
     });
   }
-};
-
+};;
 
 export const login = async (req, res) => {
   const { email, password, recaptchaToken } = req.body;
@@ -260,7 +259,8 @@ export const login = async (req, res) => {
   }
 
   const ipAddress = getClientIp(req);
-  const userAgent = req.headers['user-agent'] || '';
+  const userAgent = req.headers["user-agent"] || "";
+  const normalizedEmail = email.toLowerCase().trim();
 
   try {
     const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY;
@@ -269,7 +269,7 @@ export const login = async (req, res) => {
       `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
       }
     );
 
@@ -279,7 +279,10 @@ export const login = async (req, res) => {
       return res.status(400).json({ error: "reCAPTCHA action mismatch" });
     }
 
-    if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
+    if (
+      !recaptchaData.success ||
+      (typeof recaptchaData.score === "number" && recaptchaData.score < 0.5)
+    ) {
       return res.status(403).json({
         error: "reCAPTCHA verification failed. Suspicious activity detected.",
         recaptcha: recaptchaData,
@@ -287,7 +290,7 @@ export const login = async (req, res) => {
     }
 
     const { data, error } = await supabaseNonAdmin().auth.signInWithPassword({
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       password,
     });
 
@@ -305,7 +308,15 @@ export const login = async (req, res) => {
       });
     }
 
-    const authUser = data.user;
+    const authUser = data?.user;
+    const session = data?.session;
+
+    if (!authUser || !session) {
+      return res.status(401).json({
+        error: "Login failed. Missing authenticated session.",
+        code: "LOGIN_SESSION_MISSING",
+      });
+    }
 
     let localUser = await User.findByAuthID(authUser.id);
     if (!localUser) {
@@ -313,11 +324,15 @@ export const login = async (req, res) => {
     }
 
     if (authUser.email_confirmed_at && !localUser.is_email_verified) {
-      await User.markVerified(authUser.id);
-      localUser = await User.findByAuthID(authUser.id);
+      try {
+        await User.markVerified(authUser.id);
+        localUser = await User.findByAuthID(authUser.id);
+      } catch (verifyErr) {
+        console.error("User.markVerified failed:", verifyErr);
+      }
     }
 
-    if (!localUser.is_email_verified || !authUser.email_confirmed_at) {
+    if (!localUser?.is_email_verified || !authUser.email_confirmed_at) {
       return res.status(403).json({
         error: "Email not verified",
         code: "EMAIL_NOT_VERIFIED",
@@ -331,25 +346,52 @@ export const login = async (req, res) => {
       exists = await UserLogin.findByUUID(loginUUID);
     } while (exists);
 
+    let userLogin = null;
+
     try {
-      const userLogin = await UserLogin.create({
+      userLogin = await UserLogin.create({
         uuid: loginUUID,
         user_uuid: localUser.uuid,
         ip_address: ipAddress,
         user_agent: userAgent,
         success: true,
       });
-      console.log({userLogin})
+      console.log("UserLogin created:", userLogin);
     } catch (logErr) {
       console.error("UserLogin.create failed:", logErr);
     }
+
+    try {
+      await createChangeLogSafe({
+        uuid: generatePrefixedId("CL", 7),
+        table_name: "users",
+        record_uuid: localUser.uuid,
+        user_uuid: localUser.uuid,
+        action: "login",
+        summary: `User logged in successfully`,
+        changed_fields: ["last_logged_in_at"],
+        oldData: null,
+        newData: {
+          email: localUser.email,
+          role: localUser.role,
+          ip_address: ipAddress,
+          user_agent: userAgent,
+          login_uuid: userLogin?.uuid || loginUUID,
+          login_logged: !!userLogin,
+        },
+        source: "auth",
+      });
+    } catch (changeLogErr) {
+      console.error("createChangeLogSafe failed during login:", changeLogErr);
+    }
+
     const isStaffRole = ["admin", "owner", "employee"].includes(localUser.role);
-    
+
     const accessTokenMaxAge = isStaffRole
       ? 1000 * 60 * 60 * 24 // 1 day
-      : 1000 * 60 * 60 * 2 ; // 2 hours
+      : 1000 * 60 * 60 * 2; // 2 hours
 
-    res.cookie("accessToken", data.session.access_token, {
+    res.cookie("accessToken", session.access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -357,7 +399,7 @@ export const login = async (req, res) => {
       path: "/",
     });
 
-    res.cookie("refreshToken", data.session.refresh_token, {
+    res.cookie("refreshToken", session.refresh_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -373,12 +415,20 @@ export const login = async (req, res) => {
       path: "/",
     });
 
-    const updatedUser = await User.updateByUUID(localUser.uuid, {
-      last_logged_in_at: new Date().toISOString(),
-    });
+    let updatedUser = null;
+
+    try {
+      updatedUser = await User.updateByUUID(localUser.uuid, {
+        last_logged_in_at: new Date().toISOString(),
+      });
+    } catch (updateErr) {
+      console.error("User.updateByUUID failed:", updateErr);
+    }
 
     if (!updatedUser) {
-      return res.status(500).json({ error: "Failed to update last login time" });
+      console.warn(
+        `Login succeeded but failed to update last_logged_in_at for user ${localUser.uuid}`
+      );
     }
 
     return res.status(200).json({
@@ -397,12 +447,174 @@ export const login = async (req, res) => {
           user_metadata: authUser.user_metadata,
         },
       },
+      warnings: {
+        login_audit_saved: !!userLogin,
+        last_login_updated: !!updatedUser,
+      },
     });
   } catch (err) {
     console.error("Login error:", err);
-    return res.status(500).json({ error: err.message || "Internal server error" });
+    return res.status(500).json({
+      error: err.message || "Internal server error",
+    });
   }
 };
+
+// export const login = async (req, res) => {
+//   const { email, password, recaptchaToken } = req.body;
+
+//   if (!email || !password) {
+//     return res.status(400).json({ error: "Email and password are required" });
+//   }
+
+//   if (!recaptchaToken) {
+//     return res.status(400).json({ error: "reCAPTCHA token is missing" });
+//   }
+
+//   const ipAddress = getClientIp(req);
+//   const userAgent = req.headers['user-agent'] || '';
+
+//   try {
+//     const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY;
+
+//     const recaptchaRes = await fetch(
+//       `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
+//       {
+//         method: "POST",
+//         headers: { "Content-Type": "application/x-www-form-urlencoded" }
+//       }
+//     );
+
+//     const recaptchaData = await recaptchaRes.json();
+
+//     if (recaptchaData.action && recaptchaData.action !== "login") {
+//       return res.status(400).json({ error: "reCAPTCHA action mismatch" });
+//     }
+
+//     if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
+//       return res.status(403).json({
+//         error: "reCAPTCHA verification failed. Suspicious activity detected.",
+//         recaptcha: recaptchaData,
+//       });
+//     }
+
+//     const { data, error } = await supabaseNonAdmin().auth.signInWithPassword({
+//       email: email.toLowerCase().trim(),
+//       password,
+//     });
+
+//     if (error) {
+//       if (error.code === "email_not_confirmed") {
+//         return res.status(403).json({
+//           error: "Please confirm your email before logging in",
+//           code: "EMAIL_NOT_CONFIRMED",
+//         });
+//       }
+
+//       return res.status(401).json({
+//         error: error.message || "Invalid email or password",
+//         code: error.code || "LOGIN_FAILED",
+//       });
+//     }
+
+//     const authUser = data.user;
+
+//     let localUser = await User.findByAuthID(authUser.id);
+//     if (!localUser) {
+//       return res.status(404).json({ error: "User record not found" });
+//     }
+
+//     if (authUser.email_confirmed_at && !localUser.is_email_verified) {
+//       await User.markVerified(authUser.id);
+//       localUser = await User.findByAuthID(authUser.id);
+//     }
+
+//     if (!localUser.is_email_verified || !authUser.email_confirmed_at) {
+//       return res.status(403).json({
+//         error: "Email not verified",
+//         code: "EMAIL_NOT_VERIFIED",
+//       });
+//     }
+
+//     let loginUUID;
+//     let exists;
+//     do {
+//       loginUUID = generatePrefixedId("L", 8);
+//       exists = await UserLogin.findByUUID(loginUUID);
+//     } while (exists);
+
+//     try {
+//       const userLogin = await UserLogin.create({
+//         uuid: loginUUID,
+//         user_uuid: localUser.uuid,
+//         ip_address: ipAddress,
+//         user_agent: userAgent,
+//         success: true,
+//       });
+//       console.log({userLogin})
+//     } catch (logErr) {
+//       console.error("UserLogin.create failed:", logErr);
+//     }
+//     const isStaffRole = ["admin", "owner", "employee"].includes(localUser.role);
+    
+//     const accessTokenMaxAge = isStaffRole
+//       ? 1000 * 60 * 60 * 24 // 1 day
+//       : 1000 * 60 * 60 * 2 ; // 2 hours
+
+//     res.cookie("accessToken", data.session.access_token, {
+//       httpOnly: true,
+//       secure: process.env.NODE_ENV === "production",
+//       sameSite: "lax",
+//       maxAge: accessTokenMaxAge,
+//       path: "/",
+//     });
+
+//     res.cookie("refreshToken", data.session.refresh_token, {
+//       httpOnly: true,
+//       secure: process.env.NODE_ENV === "production",
+//       sameSite: "lax",
+//       maxAge: 1000 * 60 * 60 * 24 * 7,
+//       path: "/",
+//     });
+
+//     res.cookie("role", localUser.role, {
+//       httpOnly: true,
+//       secure: process.env.NODE_ENV === "production",
+//       sameSite: "lax",
+//       maxAge: accessTokenMaxAge,
+//       path: "/",
+//     });
+
+//     const updatedUser = await User.updateByUUID(localUser.uuid, {
+//       last_logged_in_at: new Date().toISOString(),
+//     });
+
+//     if (!updatedUser) {
+//       return res.status(500).json({ error: "Failed to update last login time" });
+//     }
+
+//     return res.status(200).json({
+//       message: "Login successful",
+//       user: {
+//         uuid: localUser.uuid,
+//         email: localUser.email,
+//         first_name: localUser.first_name,
+//         last_name: localUser.last_name,
+//         role: localUser.role,
+//         customer_uuid: localUser.customer_uuid ?? null,
+//         supabaseUser: {
+//           id: authUser.id,
+//           email: authUser.email,
+//           email_confirmed_at: authUser.email_confirmed_at,
+//           user_metadata: authUser.user_metadata,
+//         },
+//       },
+//     });
+//   } catch (err) {
+//     console.error("Login error:", err);
+//     return res.status(500).json({ error: err.message || "Internal server error" });
+//   }
+// };
 
 export const logout = async (req, res) => {
   try {
@@ -421,7 +633,7 @@ export const logout = async (req, res) => {
         }
       );
 
-      await scopedSupabase().auth.signOut();
+      await scopedSupabase.auth.signOut();
     }
 
     res.cookie("accessToken", "", {

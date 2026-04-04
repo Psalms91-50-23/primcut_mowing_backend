@@ -1,5 +1,6 @@
 import { supabase } from "../config/db.js";
 import { buildSearchOr } from '../util/util.js';
+import { normalizePhone, getPhoneCandidates, phoneMatches } from "../util/util.js";
 
 export default class Quote {
 
@@ -47,47 +48,127 @@ export default class Quote {
         return count || 0;
     }
 
+    // static async searchSummary(query, limit = 10) {
+    //     const terms = String(query || "")
+    //     .trim()
+    //     .split(/\s+/)
+    //     .filter(Boolean);
+
+    //     if (terms.length === 0) return [];
+
+    //     const orFilter = buildSearchOr(terms, [
+    //     "uuid",
+    //     "contact_first_name",
+    //     "contact_last_name",
+    //     "contact_email",
+    //     "contact_mobile",
+    //     "contact_landline",
+    //     "address",
+    //     "customer_uuid"
+    //     // "status",
+    //     ]);
+
+    //     const { data, error } = await supabase()
+    //     .from("quotes")
+    //     .select(`
+    //         uuid,
+    //         status,
+    //         contact_first_name,
+    //         contact_last_name,
+    //         contact_email,
+    //         contact_mobile,
+    //         contact_landline,
+    //         address,
+    //         total_amount,
+    //         created_at,
+    //         customer_uuid
+    //     `)
+    //     .or(orFilter)
+    //     .order("created_at", { ascending: false })
+    //     .limit(limit);
+
+    //     if (error) throw error;
+    //     return data || [];
+    // }
+
     static async searchSummary(query, limit = 10) {
-        const terms = String(query || "")
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
+        const rawQuery = String(query || "").trim();
+        const terms = rawQuery.split(/\s+/).filter(Boolean);
+        const normalizedPhone = normalizePhone(rawQuery);
 
-        if (terms.length === 0) return [];
+        if (!rawQuery) return [];
 
-        const orFilter = buildSearchOr(terms, [
-        "uuid",
-        "contact_first_name",
-        "contact_last_name",
-        "contact_email",
-        "contact_mobile",
-        "contact_landline",
-        "address",
-        "customer_uuid"
-        // "status",
-        ]);
+        const isPhoneSearch = normalizedPhone.length >= 5;
 
-        const { data, error } = await supabase()
-        .from("quotes")
-        .select(`
-            uuid,
-            status,
-            contact_first_name,
-            contact_last_name,
-            contact_email,
-            contact_mobile,
-            contact_landline,
-            address,
-            total_amount,
-            created_at,
-            customer_uuid
-        `)
-        .or(orFilter)
-        .order("created_at", { ascending: false })
-        .limit(limit);
+        let data = [];
+        let error = null;
+
+        if (isPhoneSearch) {
+            const result = await supabase()
+            .from("quotes")
+            .select(`
+                uuid,
+                status,
+                contact_first_name,
+                contact_last_name,
+                contact_email,
+                contact_mobile,
+                contact_landline,
+                address,
+                total_amount,
+                created_at,
+                customer_uuid
+            `)
+            .order("created_at", { ascending: false })
+            .limit(1000);
+
+            data = result.data || [];
+            error = result.error;
+        } else {
+            const orFilter = buildSearchOr(terms, [
+            "uuid",
+            "contact_first_name",
+            "contact_last_name",
+            "contact_email",
+            "contact_mobile",
+            "contact_landline",
+            "address",
+            "customer_uuid",
+            ]);
+
+            const result = await supabase()
+            .from("quotes")
+            .select(`
+                uuid,
+                status,
+                contact_first_name,
+                contact_last_name,
+                contact_email,
+                contact_mobile,
+                contact_landline,
+                address,
+                total_amount,
+                created_at,
+                customer_uuid
+            `)
+            .or(orFilter)
+            .order("created_at", { ascending: false })
+            .limit(limit);
+
+            data = result.data || [];
+            error = result.error;
+        }
 
         if (error) throw error;
-        return data || [];
+
+        if (!isPhoneSearch) return data || [];
+
+        const filtered = (data || []).filter((row) =>
+            phoneMatches(rawQuery, row.contact_mobile) ||
+            phoneMatches(rawQuery, row.contact_landline)
+        );
+
+        return filtered.slice(0, limit);
     }
     
     static async findAllWithPagination({

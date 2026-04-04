@@ -7,19 +7,27 @@ import {
   getPrivacyPolicyVersions,
   listPrivacyPolicies,
   activatePrivacyPolicy,
+  
 } from "../controllers/privacyPolicyController.js";
 
-// import { requireAuth } from "../middleware/requireAuth.js";
-// import { requireAdminOrOwner } from "../middleware/requireAdminOrOwner.js";
+
+import {
+  authRateLimit,
+  publicRateLimit,
+  authenticatedRateLimit
+} from '../middleware/rateLimit.middleware.js';
+
+import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireRole } from '../middleware/role.middleware.js';
 
 const router = express.Router();
 
 /**
  * Public routes
  */
-router.get("/latest", getLatestPrivacyPolicy);
-router.get("/active", getActivePrivacyPolicy);
-router.get("/uuid/:uuid", getPrivacyPolicyByUUID);
+router.get("/latest", publicRateLimit, getLatestPrivacyPolicy);
+router.get("/active", publicRateLimit, getActivePrivacyPolicy);
+router.get("/uuid/:uuid", publicRateLimit, getPrivacyPolicyByUUID);
 
 /**
  * Admin routes
@@ -27,7 +35,8 @@ router.get("/uuid/:uuid", getPrivacyPolicyByUUID);
  */
 router.get("/", listPrivacyPolicies);
 router.get("/versions", getPrivacyPolicyVersions);
-router.post("/", createPrivacyPolicy);
-router.patch("/activate/:uuid", activatePrivacyPolicy);
+// router.get("/versions", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getPrivacyPolicyVersions);
+router.post("/", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), createPrivacyPolicy);
+router.patch("/activate/:uuid", requireAuth, requireRole("admin", "owner"), activatePrivacyPolicy);
 
 export default router;

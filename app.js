@@ -25,9 +25,10 @@ import dashboardRouter from "./routes/dashboardRouter.js";
 import customerContactRouter from "./routes/customerContactRouter.js";
 import termsAndConditionsRouter from "./routes/termsAndConditionsRouter.js";
 import quoteTermsAcceptanceRouter from "./routes/quoteTermsAcceptanceRouter.js";
+import inquiryRouter from "./routes/inquiryRouter.js";
+import privacyPolicyRouter from "./routes/privacyPolicyRouter.js";
 // Middleware
 import { errorHandler } from './middleware/error.middleware.js';
-import inquiryRouter from "./routes/inquiryRouter.js";
 
 const app = express();
 
@@ -40,10 +41,10 @@ const allowedOrigins = [
   process.env.FRONTEND_URL_HAPPY_PROPERTY
 ].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i);
 
-console.log({allowedOrigins})
+// console.log({allowedOrigins})
 app.use(cookieParser());
 app.use(express.json());
-// console.log({allowedOrigins})
+
 // Enable CORS
 app.use(cors({
   origin: allowedOrigins,
@@ -74,6 +75,7 @@ app.use('/api/password-reset', passwordResetRoutes);
 app.use('/api/verify-recaptcha-v3', verifyRecaptchaV3Router);
 app.use('/api/verify-recaptcha-v2', verifyRecaptchaV2Router);
 app.use("/api/terms-and-conditions", termsAndConditionsRouter);
+app.use("/api/privacy-policies", privacyPolicyRouter);
 app.use("/api/quote-terms-acceptances", quoteTermsAcceptanceRouter);
 app.use("/api/inquiries", inquiryRouter);
 app.use("/api/jobs/public", jobAccessTokenRouter);

@@ -1,9 +1,10 @@
-import supabase from "../config/db.js";
+import { supabase } from "../config/db.js";
 import { generatePrefixedId } from "../util/util.js";
 
 export default class PrivacyPolicy {
 
   static async create({
+    uuid,
     version,
     title,
     content,
@@ -29,10 +30,8 @@ export default class PrivacyPolicy {
       throw new Error("Content is required");
     }
 
-    const uuid = generatePrefixedId("PRIV");
-
     if (is_active) {
-      const { error: deactivateError } = await supabase
+      const { error: deactivateError } = await supabase()
         .from("privacy_policies")
         .update({ is_active: false })
         .eq("is_active", true);
@@ -54,7 +53,7 @@ export default class PrivacyPolicy {
       is_active: Boolean(is_active),
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .insert([payload])
       .select("*")
@@ -68,7 +67,7 @@ export default class PrivacyPolicy {
   }
 
   static async findActive() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
         .from("privacy_policies")
         .select("*")
         .eq("is_active", true)
@@ -82,7 +81,7 @@ export default class PrivacyPolicy {
     }
 
   static async findLatest() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .select("*")
       .order("created_at", { ascending: false })
@@ -99,7 +98,7 @@ export default class PrivacyPolicy {
   static async findByUUID(uuid) {
     if (!uuid) return null;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .select("*")
       .eq("uuid", uuid)
@@ -115,7 +114,7 @@ export default class PrivacyPolicy {
   static async findByVersion(version) {
     if (!version) return null;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .select("*")
       .eq("version", version)
@@ -129,7 +128,7 @@ export default class PrivacyPolicy {
   }
 
   static async getAllVersions() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .select("version, created_at")
       .order("created_at", { ascending: false });
@@ -142,7 +141,7 @@ export default class PrivacyPolicy {
   }
 
   static async listAll() {
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .select("*")
       .order("created_at", { ascending: false });
@@ -165,7 +164,7 @@ export default class PrivacyPolicy {
       throw new Error("Privacy policy not found");
     }
 
-    const { error: deactivateError } = await supabase
+    const { error: deactivateError } = await supabase()
       .from("privacy_policies")
       .update({ is_active: false })
       .eq("is_active", true);
@@ -174,7 +173,7 @@ export default class PrivacyPolicy {
       throw new Error(deactivateError.message || "Failed to deactivate current active privacy policy");
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase()
       .from("privacy_policies")
       .update({ is_active: true })
       .eq("uuid", uuid)

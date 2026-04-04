@@ -1,43 +1,29 @@
 import { PasswordResetToken } from "../models/PasswordResetToken.js";
 import User from "../models/User.js";
 import ChangeLog from "../models/ChangeLog.js";
+import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { supabase } from "../config/db.js";
 import { resetPasswordLink } from "../lib/email/index.js";
 import {
-  generateShortId,
-  verifyEmailToken,
-  generateEmailToken,
   formatFullName,
   verifyRecaptcha,
+  generatePrefixedId,
 } from "../util/util.js";
-import { createHash } from "crypto";
 
 /**
  * Safe change log writer
  * Will never break the main request flow if logging fails
  */
-const createChangeLogSafe = async ({
-  table_name,
-  record_uuid,
-  user_uuid = null,
-  action,
-  summary = null,
-  changed_fields = null,
-  source = "public_form",
-}) => {
-  try {
-    await ChangeLog.create({
-      table_name,
-      record_uuid,
-      user_uuid,
-      action,
-      summary,
-      changed_fields,
-      source,
-    });
-  } catch (logErr) {
-    console.error("Change log error:", logErr.message);
-  }
+export const generateUniqueChangeLogUUID = async () => {
+  let uuid;
+  let exists;
+
+  do {
+    uuid = generatePrefixedId("CL", 7);
+    exists = await ChangeLog.findByUUID(uuid);
+  } while (exists);
+
+  return uuid;
 };
 
 // 1️⃣ Request password reset
@@ -55,31 +41,30 @@ export const requestPasswordReset = async (req, res) => {
   }
 
   try {
-    // Verify reCAPTCHA
     const isHuman = await verifyRecaptcha(recaptchaToken, recaptchaVersion);
 
     if (!isHuman) {
-      return res.status(400).json({ error: "Failed reCAPTCHA verification" });
+      return res.status(400).json({
+        error: "Low reCAPTCHA score",
+        code: "RECAPTCHA_LOW_SCORE",
+      });
     }
 
-    // 1. Find user by email using User model
     const userData = await User.findByEmail(email);
 
-    // If user doesn't exist, respond success anyway (security best practice)
+    // Security best practice: do not reveal whether email exists
     if (!userData) {
       return res.json({ success: true });
     }
 
-    // 2. Create a reset token
-    const { token, data } = await PasswordResetToken.create({
+    const resetToken = await PasswordResetToken.create({
       authUserId: userData.auth_user_id,
       userUuid: userData.uuid,
       expiresInMinutes: 10,
     });
 
-    const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
-
-    // 3. Send password reset email
+    const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${resetToken.token}`;
+    console.log({userData});
     await resetPasswordLink({
       to: userData.email,
       name: formatFullName(userData.first_name, undefined, true) || "There",
@@ -87,10 +72,12 @@ export const requestPasswordReset = async (req, res) => {
       expiryMinutes: 10,
     });
 
-    // 4. Change log
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     await createChangeLogSafe({
-      table_name: "password_reset_tokens",
-      record_uuid: data?.uuid || String(data?.id || userData.uuid),
+      uuid: changeLogUuid,
+      table_name: "password_resets_tokens",
+      record_uuid: resetToken.id,
       user_uuid: userData.uuid,
       action: "create",
       summary: "Password reset token requested and email sent.",
@@ -108,7 +95,10 @@ export const requestPasswordReset = async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     console.error("Error requesting password reset:", err.message);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
+    });
   }
 };
 
@@ -117,68 +107,73 @@ export const resetPassword = async (req, res) => {
   const { token, newPassword } = req.body;
 
   if (!token || !newPassword) {
-    return res
-      .status(400)
-      .json({ error: "Token and new password are required" });
+    return res.status(400).json({
+      error: "Token and new password are required",
+      code: "MISSING_FIELDS",
+    });
   }
 
   try {
-    // 1. Find the token
-    const tokenData = await PasswordResetToken.findOneByToken(token);
+    const result = await PasswordResetToken.verify({ token });
 
-    if (!tokenData) {
-      return res.status(400).json({ error: "Invalid or expired token" });
-    }
+    if (!result.ok) {
+      const status =
+        result.code === "TOKEN_LOOKUP_FAILED" ||
+        result.code === "TOKEN_VERIFY_FAILED"
+          ? 500
+          : 400;
 
-    if (tokenData.message === "Token expired") {
-      return res.status(400).json({ error: "Token expired" });
-    }
-
-    // 2. Update Supabase() auth password for auth_user_id
-    const { data: updatedUser, error: updateError } =
-      await supabase().auth.admin.updateUserById(tokenData.auth_user_id, {
-        password: newPassword,
+      return res.status(status).json({
+        error: result.error,
+        code: result.code,
       });
+    }
+
+    const tokenData = result.data;
+
+    const { error: updateError } = await supabase().auth.admin.updateUserById(
+      tokenData.auth_user_id,
+      { password: newPassword }
+    );
 
     if (updateError) throw updateError;
 
-    // 3. Mark token as used
-    await PasswordResetToken.markUsed(tokenData.id);
+    const usedToken = await PasswordResetToken.consume({ token });
 
-    // 4a. Change log for user password update
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "users",
       record_uuid: tokenData.user_uuid,
       user_uuid: tokenData.user_uuid,
       action: "update",
-      summary: "User password was reset via password reset token.",
+      summary: "User password reset via token.",
       changed_fields: {
         password: {
           old: "[REDACTED]",
           new: "[REDACTED]",
         },
         reset_method: "password_reset_token",
-        auth_user_id: tokenData.auth_user_id,
       },
       source: "public_form",
     });
 
-    // 4b. Change log for token being used
+    const tokenLogUuid = await generateUniqueChangeLogUUID();
+
     await createChangeLogSafe({
-      table_name: "password_reset_tokens",
-      record_uuid: tokenData.uuid || String(tokenData.id),
+      uuid: tokenLogUuid,
+      table_name: "password_resets_tokens",
+      record_uuid: tokenData.id,
       user_uuid: tokenData.user_uuid,
       action: "update",
-      summary: "Password reset token marked as used.",
+      summary: "Password reset token consumed.",
       changed_fields: {
         used_at: {
-          old: null,
-          new: new Date().toISOString(),
+          old: tokenData.used_at || null,
+          new: usedToken?.used_at || null,
         },
-        token_status: {
-          old: "active",
-          new: "used",
-        },
+        status: "used",
       },
       source: "public_form",
     });
@@ -186,51 +181,63 @@ export const resetPassword = async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     console.error("Error resetting password:", err.message);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
+    });
   }
 };
 
+// 3️⃣ Check reset token validity
 export const checkResetToken = async (req, res) => {
   const { token } = req.body;
 
   if (!token) {
-    return res.status(400).json({ error: "Token is required" });
+    return res.status(400).json({
+      error: "Token is required",
+      code: "TOKEN_REQUIRED",
+    });
   }
 
   try {
-    // pass raw token (do NOT hash here)
-    const tokenData = await PasswordResetToken.findOneByToken(token);
+    const result = await PasswordResetToken.verify({ token });
 
-    if (!tokenData) {
-      return res.status(400).json({ error: "Invalid token" });
+    if (!result.ok) {
+      const status =
+        result.code === "TOKEN_LOOKUP_FAILED" ||
+        result.code === "TOKEN_VERIFY_FAILED"
+          ? 500
+          : 400;
+
+      return res.status(status).json({
+        error: result.error,
+        code: result.code,
+      });
     }
 
-    if (new Date() > new Date(tokenData.expires_at)) {
-      return res.status(400).json({ error: "Token expired" });
-    }
+    const tokenData = result.data;
 
-    if (tokenData.used_at) {
-      return res.status(400).json({ error: "Token already used" });
-    }
+    const changeLogUuid = await generateUniqueChangeLogUUID();
 
-    // Optional change log:
-    // Only keep this if your action enum supports something like "read" or "verify".
-    // Otherwise leave it out.
     await createChangeLogSafe({
-      table_name: "password_reset_tokens",
-      record_uuid: tokenData.uuid || String(tokenData.id),
+      uuid: changeLogUuid,
+      table_name: "password_resets_tokens",
+      record_uuid: tokenData.id,
       user_uuid: tokenData.user_uuid || null,
-      action: "update",
-      summary: "Password reset token was validated before password reset.",
+      action: "system_event",
+      summary: "Password reset token validated.",
       changed_fields: {
-        token_validation_checked: true,
+        validation_checked: true,
       },
       source: "public_form",
     });
 
-    return res.json({ success: true, tokenData });
+    return res.json({ success: true });
   } catch (err) {
     console.error("Error checking reset token:", err.message);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
+    });
   }
 };

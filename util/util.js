@@ -170,6 +170,43 @@ export const normalizedEmail = (email) => {
   return email?.trim().toLowerCase() || null;
 };
 
+export const normalizePhone = (value = "") => {
+  return String(value).replace(/\D/g, "");
+};
+
+export const getPhoneCandidates = (value = "") => {
+  const digits = normalizePhone(value);
+  if (!digits) return [];
+
+  const set = new Set([digits]);
+
+  // NZ local <-> +64 variants
+  if (digits.startsWith("0")) {
+    set.add(`64${digits.slice(1)}`);
+  }
+
+  if (digits.startsWith("64")) {
+    set.add(`0${digits.slice(2)}`);
+  }
+
+  return Array.from(set).filter(Boolean);
+}
+
+export const phoneMatches = (searchValue = "", storedValue = "") => {
+  const searchCandidates = getPhoneCandidates(searchValue);
+  const storedCandidates = getPhoneCandidates(storedValue);
+
+  return searchCandidates.some((search) =>
+    storedCandidates.some(
+      (stored) =>
+        stored.includes(search) ||
+        search.includes(stored) ||
+        stored.endsWith(search) ||
+        search.endsWith(stored)
+    )
+  );
+}
+
 export const generatePrefixedId = (prefix, size = DEFAULT_LENGTH) => {
     let id = "";
     const bytes = crypto.randomBytes(size);

@@ -1,6 +1,9 @@
 import PrivacyPolicy from "../models/PrivacyPolicy.js";
-
+import {
+  generatePrefixedId,
+} from "../util/util.js";
 export const createPrivacyPolicy = async (req, res) => {
+  
   try {
     const {
       version,
@@ -13,6 +16,7 @@ export const createPrivacyPolicy = async (req, res) => {
       is_active,
     } = req.body || {};
 
+    console.log(req.body)
     if (!version?.trim()) {
       return res.status(400).json({ error: "Version is required" });
     }
@@ -32,7 +36,17 @@ export const createPrivacyPolicy = async (req, res) => {
       });
     }
 
+    let privacyUUID;
+    let exists;
+
+    do {
+      privacyUUID = generatePrefixedId("PP", 7);
+      exists = await PrivacyPolicy.findByUUID(privacyUUID);
+    } while (exists);
+
+
     const created = await PrivacyPolicy.create({
+      uuid: privacyUUID,
       version,
       title,
       content,

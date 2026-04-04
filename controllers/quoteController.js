@@ -4,6 +4,7 @@ import Service from "../models/Service.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import Job from "../models/Job.js";
 import User from "../models/User.js";
+import PrivacyPolicyAcceptance from "../models/PrivacyPolicyAcceptance.js";
 import TermsAndConditions from "../models/TermsAndConditions.js";
 import crypto from "crypto";
 import {
@@ -663,12 +664,14 @@ export const getQuoteByUUID = async (req, res) => {
 //   }
 // };
 
-// Update by UUID
-
 export const createQuote = async (req, res) => {
   let newQuote = null;
   let quoteAccessToken = null;
   let uploadedImages = [];
+  let createdPrivacyAcceptance = null;
+  let createdChangeLog = null;
+
+  const rollbackSteps = [];
 
   try {
     const files = Array.isArray(req.files) ? req.files : [];
@@ -685,6 +688,7 @@ export const createQuote = async (req, res) => {
       address,
       recurrence_frequency,
       urgent,
+      privacy_consent,
     } = req.body;
 
     const services = Array.isArray(req.body.services)
@@ -698,6 +702,9 @@ export const createQuote = async (req, res) => {
       : [];
 
     const isUrgentRequested = urgent === true || urgent === "true";
+    const hasPrivacyConsent =
+      privacy_consent === true || privacy_consent === "true";
+
     const actorUserUuid = req.user?.uuid || null;
 
     let actorUser = null;
@@ -710,7 +717,7 @@ export const createQuote = async (req, res) => {
       actorUser = await User.findByUUID(actorUserUuid);
 
       if (actorUser?.role === "customer") {
-        source = "customer_portal";
+        source = "public_form";
 
         if (actorUser.customer_uuid) {
           actorCustomer = await Customer.findByUUID(actorUser.customer_uuid);
@@ -765,6 +772,22 @@ export const createQuote = async (req, res) => {
     )
       ? recurrence_frequency
       : "one_off";
+
+    if (!hasPrivacyConsent) {
+      return res.status(400).json({
+        error:
+          "Privacy policy consent is required before submitting a quote request.",
+      });
+    }
+
+    const activePrivacyPolicy = await PrivacyPolicy.findActive();
+
+    if (!activePrivacyPolicy) {
+      return res.status(400).json({
+        error:
+          "No active privacy policy is available at the moment. Please try again later.",
+      });
+    }
 
     if (!resolvedFirstName || !resolvedLastName) {
       return res.status(400).json({
@@ -971,6 +994,15 @@ export const createQuote = async (req, res) => {
       });
     }
 
+    rollbackSteps.push(async () => {
+      if (uploadedImages.length) {
+        await removeUploadedFiles({
+          bucket: QUOTE_IMAGES_BUCKET,
+          files: uploadedImages,
+        });
+      }
+    });
+
     const actionToken = crypto.randomBytes(32).toString("hex");
     const actionTokenHash = crypto
       .createHash("sha256")
@@ -1007,12 +1039,61 @@ export const createQuote = async (req, res) => {
     };
 
     newQuote = await Quote.create(newQuoteData);
-    console.log({newQuote})
     if (!newQuote) {
       throw new Error("Failed to create quote");
     }
-    
-    await createChangeLogSafe({
+
+    rollbackSteps.push(async () => {
+      if (newQuote?.uuid) {
+        await Quote.hardDelete(newQuote.uuid);
+      }
+    });
+
+    const acceptanceUuidExists = async (candidate) => {
+      const existing = await PrivacyPolicyAcceptance.findByUUID(candidate);
+      return !!existing;
+    };
+
+    let acceptanceUuid;
+    let acceptanceExists;
+
+    do {
+      acceptanceUuid = generatePrefixedId("PPA", 7);
+      acceptanceExists = await acceptanceUuidExists(acceptanceUuid);
+    } while (acceptanceExists);
+
+    createdPrivacyAcceptance = await PrivacyPolicyAcceptance.create({
+      uuid: acceptanceUuid,
+      privacy_policy_uuid: activePrivacyPolicy.uuid,
+      version: activePrivacyPolicy.version,
+      quote_uuid: newQuote.uuid,
+      acceptance_source: "quote_form",
+      accepted_at: new Date().toISOString(),
+      ip_address:
+        req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
+        req.socket?.remoteAddress ||
+        null,
+      user_agent: req.headers["user-agent"] || null,
+    });
+
+    rollbackSteps.push(async () => {
+      if (createdPrivacyAcceptance?.uuid) {
+        await PrivacyPolicyAcceptance.hardDeleteByUUID(
+          createdPrivacyAcceptance.uuid
+        );
+      }
+    });
+
+    let changeLogUuid;
+    let existingChangeLog;
+
+    do {
+      changeLogUuid = generatePrefixedId("CL", 7);
+      existingChangeLog = await ChangeLog.findByUUID(changeLogUuid);
+    } while (existingChangeLog);
+
+    createdChangeLog = await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: newQuote.uuid,
       user_uuid: actorUserUuid,
@@ -1048,8 +1129,17 @@ export const createQuote = async (req, res) => {
           old: null,
           new: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
         },
+        privacy_policy_uuid: { old: null, new: activePrivacyPolicy.uuid },
+        privacy_policy_version: { old: null, new: activePrivacyPolicy.version },
+        privacy_consent: { old: null, new: true },
       },
       source,
+    });
+
+    rollbackSteps.push(async () => {
+      if (createdChangeLog?.uuid) {
+        await ChangeLog.hardDeleteByUUID(createdChangeLog.uuid);
+      }
     });
 
     let tokenUuid;
@@ -1065,6 +1155,12 @@ export const createQuote = async (req, res) => {
       token_hash: actionTokenHash,
       expires_at: tokenExpiresAt,
       uuid: tokenUuid,
+    });
+
+    rollbackSteps.push(async () => {
+      if (quoteAccessToken?.uuid) {
+        await QuoteAccessToken.revokeToken(quoteAccessToken.uuid);
+      }
     });
 
     const employeeLink = `${process.env.CLIENT_URL}/employee/quotes/${uuid}`;
@@ -1092,36 +1188,485 @@ export const createQuote = async (req, res) => {
       urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
     });
 
-    return res.status(201).json({ data: newQuote });
+    return res.status(201).json({
+      data: newQuote,
+      privacy_policy_acceptance_uuid: createdPrivacyAcceptance?.uuid || null,
+    });
   } catch (error) {
     console.error("createQuote error:", error);
 
-    if (quoteAccessToken?.uuid) {
+    for (let i = rollbackSteps.length - 1; i >= 0; i -= 1) {
       try {
-        await QuoteAccessToken.revokeToken(quoteAccessToken.uuid);
-      } catch (err) {
-        console.error("Rollback token failed:", err);
+        await rollbackSteps[i]();
+      } catch (rollbackError) {
+        console.error(`Rollback step ${i} failed:`, rollbackError);
       }
-    }
-
-    if (newQuote?.uuid) {
-      try {
-        await Quote.hardDelete(newQuote.uuid);
-      } catch (err) {
-        console.error("Rollback quote failed:", err);
-      }
-    }
-
-    if (uploadedImages.length) {
-      await removeUploadedFiles({
-        bucket: QUOTE_IMAGES_BUCKET,
-        files: uploadedImages,
-      });
     }
 
     return res.status(500).json({ error: "Server error" });
   }
 };
+
+// export const createQuote = async (req, res) => {
+//   let newQuote = null;
+//   let quoteAccessToken = null;
+//   let uploadedImages = [];
+
+//   try {
+//     const files = Array.isArray(req.files) ? req.files : [];
+
+//     const {
+//       customer_uuid,
+//       first_name,
+//       last_name,
+//       mobile,
+//       landline,
+//       preferred_contact_method,
+//       email,
+//       message,
+//       address,
+//       recurrence_frequency,
+//       urgent,
+//     } = req.body;
+
+//     const services = Array.isArray(req.body.services)
+//       ? req.body.services
+//       : parseJSONField(req.body.services, []);
+
+//     const imageLabels = Array.isArray(req.body.image_labels)
+//       ? req.body.image_labels
+//       : req.body.image_labels
+//       ? [req.body.image_labels]
+//       : [];
+
+//     const isUrgentRequested = urgent === true || urgent === "true";
+//     const actorUserUuid = req.user?.uuid || null;
+
+//     let actorUser = null;
+//     let actorCustomer = null;
+//     let existingCustomer = null;
+
+//     let source = "public_form";
+
+//     if (actorUserUuid) {
+//       actorUser = await User.findByUUID(actorUserUuid);
+
+//       if (actorUser?.role === "customer") {
+//         source = "customer_portal";
+
+//         if (actorUser.customer_uuid) {
+//           actorCustomer = await Customer.findByUUID(actorUser.customer_uuid);
+//         }
+//       } else {
+//         source = "dashboard";
+//       }
+//     }
+
+//     const resolvedFirstName = (
+//       first_name?.trim() ||
+//       actorCustomer?.first_name ||
+//       actorUser?.first_name ||
+//       ""
+//     ).trim();
+
+//     const resolvedLastName = (
+//       last_name?.trim() ||
+//       actorCustomer?.last_name ||
+//       actorUser?.last_name ||
+//       ""
+//     ).trim();
+
+//     const resolvedEmail = (
+//       email?.trim().toLowerCase() ||
+//       actorCustomer?.email ||
+//       actorUser?.email ||
+//       null
+//     );
+
+//     const resolvedMobile =
+//       mobile?.trim() || actorCustomer?.mobile_phone || null;
+
+//     const resolvedLandline =
+//       landline?.trim() || actorCustomer?.landline_phone || null;
+
+//     const resolvedAddress = (
+//       address?.trim() ||
+//       actorCustomer?.address ||
+//       ""
+//     ).trim();
+
+//     const allowedRecurrenceFrequencies = [
+//       "one_off",
+//       "weekly",
+//       "fortnightly",
+//       "monthly",
+//     ];
+
+//     const normalizedRecurrenceFrequency = allowedRecurrenceFrequencies.includes(
+//       recurrence_frequency
+//     )
+//       ? recurrence_frequency
+//       : "one_off";
+
+//     if (!resolvedFirstName || !resolvedLastName) {
+//       return res.status(400).json({
+//         error: "First name and last name are required",
+//       });
+//     }
+
+//     if (!resolvedMobile && !resolvedLandline) {
+//       return res.status(400).json({
+//         error: "Please provide either a mobile or landline number",
+//       });
+//     }
+
+//     if (!Array.isArray(services) || services.length === 0) {
+//       return res.status(400).json({
+//         error: "At least one service is required",
+//       });
+//     }
+
+//     if (!resolvedAddress) {
+//       return res.status(400).json({
+//         error: "Address is required",
+//       });
+//     }
+
+//     if (resolvedEmail) {
+//       existingCustomer = await Customer.findByEmail(resolvedEmail);
+
+//       if (existingCustomer?.is_blacklisted) {
+//         return res.status(403).json({
+//           error: "We are unable to process this request at this time.",
+//           code: "CUSTOMER_BLACKLISTED",
+//         });
+//       }
+//     }
+
+//     const resolvedCustomerUuid =
+//       customer_uuid ||
+//       actorCustomer?.uuid ||
+//       actorUser?.customer_uuid ||
+//       existingCustomer?.uuid ||
+//       null;
+
+//     const cleanedServices = services
+//       .map((service) => {
+//         if (!service || typeof service !== "object") return null;
+
+//         const service_uuid =
+//           typeof service.service_uuid === "string"
+//             ? service.service_uuid.trim()
+//             : null;
+
+//         const code =
+//           typeof service.code === "string" ? service.code.trim() : null;
+
+//         const label =
+//           typeof service.label === "string" ? service.label.trim() : null;
+
+//         const description =
+//           typeof service.description === "string" && service.description.trim()
+//             ? service.description.trim()
+//             : null;
+
+//         const quantity =
+//           service.quantity !== undefined && service.quantity !== null
+//             ? Number(service.quantity)
+//             : null;
+
+//         const unit =
+//           typeof service.unit === "string" ? service.unit.trim() : null;
+
+//         const unit_price =
+//           service.unit_price !== undefined && service.unit_price !== null
+//             ? Number(service.unit_price)
+//             : null;
+
+//         const line_total =
+//           service.line_total !== undefined && service.line_total !== null
+//             ? Number(service.line_total)
+//             : null;
+
+//         if (!service_uuid && !code && !label) return null;
+
+//         return {
+//           service_uuid,
+//           code,
+//           label,
+//           description,
+//           quantity,
+//           unit,
+//           unit_price,
+//           line_total,
+//         };
+//       })
+//       .filter(Boolean);
+
+//     if (cleanedServices.length === 0) {
+//       return res.status(400).json({
+//         error: "At least one valid service is required",
+//       });
+//     }
+
+//     if (isUrgentRequested && cleanedServices.length !== 1) {
+//       return res.status(400).json({
+//         error:
+//           "Only 1 urgent request can be done per job. Please select one urgent-eligible service only.",
+//       });
+//     }
+
+//     if (isUrgentRequested) {
+//       const selectedService = cleanedServices[0];
+
+//       let dbService = null;
+
+//       try {
+//         if (selectedService.service_uuid) {
+//           dbService = await Service.getByUUID(selectedService.service_uuid);
+//         }
+
+//         if (!dbService && selectedService.code) {
+//           dbService = await Service.getByCode(selectedService.code);
+//         }
+//       } catch (serviceError) {
+//         console.error("Service validation failed:", serviceError);
+//         return res.status(400).json({
+//           error: "Selected service could not be validated.",
+//         });
+//       }
+
+//       if (!dbService) {
+//         return res.status(400).json({
+//           error: "Selected service could not be validated.",
+//         });
+//       }
+
+//       if (!dbService.is_active || dbService.is_deleted) {
+//         return res.status(400).json({
+//           error: "Selected service is not currently available.",
+//         });
+//       }
+
+//       if (!dbService.urgent_allowed) {
+//         return res.status(400).json({
+//           error: "Urgent booking is not available for the selected service.",
+//         });
+//       }
+//     }
+
+//     const normalizedMobile = resolvedMobile
+//       ? normalizeNZPhone(resolvedMobile)
+//       : null;
+
+//     const normalizedLandline = resolvedLandline
+//       ? normalizeNZPhone(resolvedLandline)
+//       : null;
+
+//     const allowedMethods = ["mobile", "landline", "email"];
+
+//     const normalizedPreferredContactMethod = allowedMethods.includes(
+//       preferred_contact_method
+//     )
+//       ? preferred_contact_method
+//       : normalizedMobile
+//       ? "mobile"
+//       : normalizedLandline
+//       ? "landline"
+//       : "email";
+
+//     let uuid;
+//     let exists;
+
+//     do {
+//       uuid = generatePrefixedId("Q", 8);
+//       exists = await Quote.findByUUID(uuid);
+//     } while (exists);
+
+//     if (files.length > 10) {
+//       return res.status(400).json({
+//         error: "You can upload a maximum of 10 images.",
+//       });
+//     }
+
+//     uploadedImages = [];
+
+//     for (let i = 0; i < files.length; i += 1) {
+//       const uploaded = await uploadImageToBucket({
+//         bucket: QUOTE_IMAGES_BUCKET,
+//         folder: `quotes/${uuid}`,
+//         file: files[i],
+//         index: i,
+//       });
+
+//       uploadedImages.push({
+//         label:
+//           typeof imageLabels[i] === "string" && imageLabels[i].trim()
+//             ? imageLabels[i].trim()
+//             : `Image ${i + 1}`,
+//         url: uploaded.url,
+//         path: uploaded.path,
+//         file_name: uploaded.file_name,
+//         mime_type: uploaded.mime_type,
+//         size: uploaded.size,
+//         uploaded_at: uploaded.uploaded_at,
+//       });
+//     }
+
+//     const actionToken = crypto.randomBytes(32).toString("hex");
+//     const actionTokenHash = crypto
+//       .createHash("sha256")
+//       .update(actionToken)
+//       .digest("hex");
+
+//     const tokenExpiresAt = new Date();
+//     tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 2);
+
+//     const newQuoteData = {
+//       uuid,
+//       customer_uuid: resolvedCustomerUuid,
+//       contact_first_name: resolvedFirstName,
+//       contact_last_name: resolvedLastName,
+//       contact_mobile: normalizedMobile,
+//       contact_landline: normalizedLandline,
+//       preferred_contact_method: normalizedPreferredContactMethod,
+//       contact_email: resolvedEmail,
+//       message: message?.trim() || null,
+//       services: cleanedServices,
+//       subtotal_amount: 0,
+//       gst_amount: 0,
+//       total_amount: 0,
+//       status: "draft",
+//       has_urgent_fee: isUrgentRequested,
+//       urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+//       is_quote_sent_to_client: false,
+//       quote_sent_at: null,
+//       address: resolvedAddress,
+//       images: uploadedImages,
+//       responded_at: null,
+//       sent_by_user_uuid: actorUserUuid,
+//       recurrence_frequency: normalizedRecurrenceFrequency,
+//     };
+
+//     newQuote = await Quote.create(newQuoteData);
+//     if (!newQuote) {
+//       throw new Error("Failed to create quote");
+//     }
+    
+//     await createChangeLogSafe({
+//       table_name: "quotes",
+//       record_uuid: newQuote.uuid,
+//       user_uuid: actorUserUuid,
+//       action: "create",
+//       summary: actorUserUuid
+//         ? `Quote ${newQuote.uuid} created by logged-in user`
+//         : `Quote ${newQuote.uuid} created from public form`,
+//       changed_fields: {
+//         uuid: { old: null, new: newQuote.uuid },
+//         customer_uuid: { old: null, new: resolvedCustomerUuid },
+//         contact_first_name: { old: null, new: resolvedFirstName },
+//         contact_last_name: { old: null, new: resolvedLastName },
+//         contact_mobile: { old: null, new: normalizedMobile },
+//         contact_landline: { old: null, new: normalizedLandline },
+//         preferred_contact_method: {
+//           old: null,
+//           new: normalizedPreferredContactMethod,
+//         },
+//         contact_email: { old: null, new: resolvedEmail },
+//         message: { old: null, new: message?.trim() || null },
+//         address: { old: null, new: resolvedAddress },
+//         services: { old: null, new: cleanedServices },
+//         images: { old: null, new: uploadedImages },
+//         status: { old: null, new: "draft" },
+//         is_quote_sent_to_client: { old: null, new: false },
+//         sent_by_user_uuid: { old: null, new: actorUserUuid },
+//         recurrence_frequency: {
+//           old: null,
+//           new: normalizedRecurrenceFrequency,
+//         },
+//         has_urgent_fee: { old: null, new: isUrgentRequested },
+//         urgent_fee_amount: {
+//           old: null,
+//           new: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+//         },
+//       },
+//       source,
+//     });
+
+//     let tokenUuid;
+//     let existsToken;
+
+//     do {
+//       tokenUuid = generatePrefixedId("QT", 7);
+//       existsToken = await QuoteAccessToken.findByUUID(tokenUuid);
+//     } while (existsToken);
+
+//     quoteAccessToken = await QuoteAccessToken.create({
+//       quote_uuid: newQuote.uuid,
+//       token_hash: actionTokenHash,
+//       expires_at: tokenExpiresAt,
+//       uuid: tokenUuid,
+//     });
+
+//     const employeeLink = `${process.env.CLIENT_URL}/employee/quotes/${uuid}`;
+//     const subjectHeader = `New Quote Request from ${formatFullName(
+//       resolvedFirstName,
+//       resolvedLastName,
+//       false
+//     )} Quote #${uuid}`;
+
+//     await sendQuoteToBusiness({
+//       quoteUuid: uuid,
+//       firstName: formatFullName(resolvedFirstName, null, true),
+//       lastName: formatFullName(null, resolvedLastName, true),
+//       mobile: normalizedMobile ?? "-",
+//       landline: normalizedLandline ?? "-",
+//       email: resolvedEmail,
+//       message: message?.trim() || null,
+//       services: cleanedServices,
+//       images: uploadedImages,
+//       employeeLink,
+//       address: resolvedAddress,
+//       recurrenceFrequency: normalizedRecurrenceFrequency,
+//       subjectHeader,
+//       has_urgent_fee: isUrgentRequested,
+//       urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+//     });
+
+//     return res.status(201).json({ data: newQuote });
+//   } catch (error) {
+//     console.error("createQuote error:", error);
+
+//     if (quoteAccessToken?.uuid) {
+//       try {
+//         await QuoteAccessToken.revokeToken(quoteAccessToken.uuid);
+//       } catch (err) {
+//         console.error("Rollback token failed:", err);
+//       }
+//     }
+
+//     if (newQuote?.uuid) {
+//       try {
+//         await Quote.hardDelete(newQuote.uuid);
+//       } catch (err) {
+//         console.error("Rollback quote failed:", err);
+//       }
+//     }
+
+//     if (uploadedImages.length) {
+//       await removeUploadedFiles({
+//         bucket: QUOTE_IMAGES_BUCKET,
+//         files: uploadedImages,
+//       });
+//     }
+
+//     return res.status(500).json({ error: "Server error" });
+//   }
+// };
+
+
+// Update by UUID
+
 
 export const updateQuoteByUUID = async (req, res) => {
   const { uuid } = req.params;

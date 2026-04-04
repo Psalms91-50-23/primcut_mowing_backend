@@ -1,64 +1,65 @@
 import { supabase } from "../config/db.js";
 
-class ChangeLog {
+export default class ChangeLog {
+  
   static tableName = "change_logs";
 
-  /**
-   * Log a change to the database
-   * @param {Object} params
-   * @param {string} params.table
-   * @param {string} params.record_uuid
-   * @param {string|null} params.user_uuid
-   * @param {Object|null} params.oldData
-   * @param {Object|null} params.newData
-   * @param {string} params.action
-   */
-
   static async create({
+    uuid,
     table_name,
     record_uuid,
     user_uuid = null,
     oldData = null,
     newData = null,
+    changed_fields = null,
     action,
     summary = null,
     source = "dashboard",
   }) {
+    if (!uuid) throw new Error("uuid is required");
     if (!table_name) throw new Error("table_name is required");
     if (!record_uuid) throw new Error("record_uuid is required");
     if (!action) throw new Error("action is required");
 
-    const changedFields = {};
+    let computedChangedFields = null;
 
-    const oldObj = oldData || {};
-    const newObj = newData || {};
+    if (changed_fields && typeof changed_fields === "object") {
+      computedChangedFields = changed_fields;
+    } else {
+      const changedFields = {};
+      const oldObj = oldData || {};
+      const newObj = newData || {};
 
-    const allKeys = new Set([
-      ...Object.keys(oldObj),
-      ...Object.keys(newObj),
-    ]);
+      const allKeys = new Set([
+        ...Object.keys(oldObj),
+        ...Object.keys(newObj),
+      ]);
 
-    for (const key of allKeys) {
-      const oldValue = oldObj[key] ?? null;
-      const newValue = newObj[key] ?? null;
+      for (const key of allKeys) {
+        const oldValue = oldObj[key] ?? null;
+        const newValue = newObj[key] ?? null;
 
-      if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
-        changedFields[key] = {
-          old: oldValue,
-          new: newValue,
-        };
+        if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+          changedFields[key] = {
+            old: oldValue,
+            new: newValue,
+          };
+        }
       }
+
+      computedChangedFields =
+        Object.keys(changedFields).length > 0 ? changedFields : null;
     }
 
     const payload = {
+      uuid,
       table_name,
       record_uuid,
       user_uuid,
       action,
       summary,
       source,
-      changed_fields:
-        Object.keys(changedFields).length > 0 ? changedFields : null,
+      changed_fields: computedChangedFields,
     };
 
     const { data, error } = await supabase()
@@ -72,6 +73,24 @@ class ChangeLog {
     }
 
     return data;
+  }
+
+  static async findByUUID(uuid) {
+    if (!uuid) {
+      throw new Error("Change log uuid is required");
+    }
+
+    const { data, error } = await supabase()
+      .from(this.tableName)
+      .select("*")
+      .eq("uuid", uuid)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Error fetching change log by uuid: ${error.message}`);
+    }
+
+    return data || null;
   }
 
   static async findAll() {
@@ -128,6 +147,21 @@ class ChangeLog {
     if (error) throw new Error(error.message);
     return data;
   }
-}
 
-export default ChangeLog;
+  static async hardDeleteByUUID(uuid) {
+    if (!uuid) {
+      throw new Error("Change log uuid is required");
+    }
+
+    const { error } = await supabase()
+      .from(this.tableName)
+      .delete()
+      .eq("uuid", uuid);
+
+    if (error) {
+      throw new Error(`Error deleting change log by uuid: ${error.message}`);
+    }
+
+    return true;
+  }
+}

@@ -1,6 +1,6 @@
 import { supabase } from '../config/db.js';
 import { getQuotePdfPublicUrl } from '../util/getQuotePdfPublicUrl.js';
-import { buildSearchOr } from '../util/util.js';
+import { obfuscateName, obfuscateAddress, normalizePhone, buildSearchOr, phoneMatches } from "../util/util.js";
 
 export default class Customer {
 
@@ -138,33 +138,105 @@ export default class Customer {
         }));
     }
 
+    // static async searchSummary(query, limit = 10) {
+    //     const terms = String(query || "")
+    //     .trim()
+    //     .split(/\s+/)
+    //     .filter(Boolean);
+
+    //     if (terms.length === 0) return [];
+
+    //     const orFilter = buildSearchOr(terms, [
+    //     "uuid",
+    //     "first_name",
+    //     "last_name",
+    //     "email",
+    //     "mobile_phone",
+    //     "landline_phone",
+    //     "address",
+    //     ]);
+
+    //     const { data, error } = await supabase()
+    //     .from("customers")
+    //     .select("uuid, first_name, last_name, email, mobile_phone, landline_phone, address, created_at")
+    //     .or(orFilter)
+    //     .order("created_at", { ascending: false })
+    //     .limit(limit);
+
+    //     if (error) throw error;
+    //     return data || [];
+    // }
     static async searchSummary(query, limit = 10) {
-        const terms = String(query || "")
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
+        const rawQuery = String(query || "").trim();
+        const terms = rawQuery.split(/\s+/).filter(Boolean);
+        const normalizedPhone = normalizePhone(rawQuery);
 
-        if (terms.length === 0) return [];
+        if (!rawQuery) return [];
 
-        const orFilter = buildSearchOr(terms, [
-        "uuid",
-        "first_name",
-        "last_name",
-        "email",
-        "mobile_phone",
-        "landline_phone",
-        "address",
-        ]);
+        const isPhoneSearch = normalizedPhone.length >= 5;
 
-        const { data, error } = await supabase()
-        .from("customers")
-        .select("uuid, first_name, last_name, email, mobile_phone, landline_phone, address, created_at")
-        .or(orFilter)
-        .order("created_at", { ascending: false })
-        .limit(limit);
+        let data = [];
+        let error = null;
+
+        if (isPhoneSearch) {
+            const result = await supabase()
+            .from("customers")
+            .select(`
+                uuid,
+                first_name,
+                last_name,
+                email,
+                mobile_phone,
+                landline_phone,
+                address,
+                created_at
+            `)
+            .order("created_at", { ascending: false })
+            .limit(1000);
+
+            data = result.data || [];
+            error = result.error;
+        } else {
+            const orFilter = buildSearchOr(terms, [
+            "uuid",
+            "first_name",
+            "last_name",
+            "email",
+            "mobile_phone",
+            "landline_phone",
+            "address",
+            ]);
+
+            const result = await supabase()
+            .from("customers")
+            .select(`
+                uuid,
+                first_name,
+                last_name,
+                email,
+                mobile_phone,
+                landline_phone,
+                address,
+                created_at
+            `)
+            .or(orFilter)
+            .order("created_at", { ascending: false })
+            .limit(limit);
+
+            data = result.data || [];
+            error = result.error;
+        }
 
         if (error) throw error;
-        return data || [];
+
+        if (!isPhoneSearch) return data || [];
+
+        const filtered = (data || []).filter((row) =>
+            phoneMatches(rawQuery, row.mobile_phone) ||
+            phoneMatches(rawQuery, row.landline_phone)
+        );
+
+        return filtered.slice(0, limit);
     }
 
     static async findAllWithDetailsPaginated({

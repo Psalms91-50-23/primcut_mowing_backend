@@ -1,9 +1,9 @@
 import { supabase } from "../config/db.js";
 
 export default class Inquiry {
+  static tableName = "inquiries";
 
   static async create(data) {
-    
     const {
       uuid,
       customer_uuid = null,
@@ -17,7 +17,7 @@ export default class Inquiry {
     } = data;
 
     const { data: inquiry, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .insert([
         {
           uuid,
@@ -39,9 +39,8 @@ export default class Inquiry {
   }
 
   static async findByUUID(uuid) {
-
     const { data, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .select("*")
       .eq("uuid", uuid)
       .maybeSingle();
@@ -50,34 +49,52 @@ export default class Inquiry {
     return data || null;
   }
 
-  // static async findByUUID(uuid) {
-  //   const { data, error } = await supabase()
-  //     .from("inquiries")
-  //     .select("*")
-  //     .eq("uuid", uuid)
-  //     .single();
-
-  //   if (error) {
-  //     if (error.code === "PGRST116") return null;
-  //     throw error;
-  //   }
-
-  //   return data;
-  // }
-
   static async getAll() {
     const { data, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .select("*")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    return data;
+    return data || [];
+  }
+
+  static async getPaginated({
+    page = 1,
+    limit = 10,
+    status = null,
+  } = {}) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 10));
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
+    let query = supabase()
+      .from(this.tableName)
+      .select("*", { count: "exact" });
+
+    if (status) {
+      query = query.eq("status", status);
+    }
+
+    const { data, error, count } = await query
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    return {
+      inquiries: data || [],
+      total: count || 0,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil((count || 0) / safeLimit),
+    };
   }
 
   static async getAllByCustomerUUID(customer_uuid) {
     const { data, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .select(`
         uuid,
         first_name,
@@ -93,12 +110,12 @@ export default class Inquiry {
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    return data;
+    return data || [];
   }
 
   static async findCustomerInquiryByUUID(customer_uuid, inquiry_uuid) {
     const { data, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .select(`
         uuid,
         first_name,
@@ -122,21 +139,9 @@ export default class Inquiry {
     return data;
   }
 
-  // static async updateByUUID(uuid, updates) {
-  //   const { data, error } = await supabase()
-  //     .from("inquiries")
-  //     .update(updates)
-  //     .eq("uuid", uuid)
-  //     .select("*")
-  //     .single();
-
-  //   if (error) throw error;
-  //   return data;
-  // }
-
   static async updateByUUID(uuid, updates) {
     const { data, error } = await supabase()
-      .from("inquiries")
+      .from(this.tableName)
       .update(updates)
       .eq("uuid", uuid)
       .select("*")
@@ -147,13 +152,14 @@ export default class Inquiry {
   }
 
   static async deleteByUUID(uuid) {
-    const { error } = await supabase()
-      .from("inquiries")
+    const { data, error } = await supabase()
+      .from(this.tableName)
       .delete()
-      .eq("uuid", uuid);
+      .eq("uuid", uuid)
+      .select("*")
+      .maybeSingle();
 
     if (error) throw error;
-
-    return true;
+    return data || null;
   }
 }

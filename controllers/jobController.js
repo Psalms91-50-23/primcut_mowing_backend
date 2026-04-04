@@ -1,6 +1,6 @@
 import Job from "../models/Job.js";
 import Quote from "../models/Quote.js";
-import Customer from "../models/Customer.js";
+// import Customer from "../models/Customer.js";
 import JobRecurrence from "../models/JobRecurrence.js";
 import sendJobScheduleToClient from '../lib/email/sendJobScheduleToClient.js';
 import { createChangeLogSafe } from '../util/createChangeLogSafe.js';
@@ -1237,8 +1237,6 @@ export const updateJobSchedule = async (req, res) => {
   const { uuid } = req.params;
   const { mode, job, recurrence } = req.body || {};
   const actorUserUuid = req.user?.uuid || null;
-
-  console.log({ job });
 
   if (!uuid) {
     return res.status(400).json({ error: "Job UUID is required" });
