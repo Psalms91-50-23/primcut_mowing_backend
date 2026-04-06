@@ -8,6 +8,8 @@ import { sendQuoteToClient } from "../lib/email/index.js";
 import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
+import { createChangeLogSafe }  from "../util/createChangeLogSafe.js";
+import ChangeLog from '../models/ChangeLog.js';
 
 const EMAIL_SECRET = process.env.EMAIL_SECRET || 'supersecret123';
 const EMAIL_TOKEN_EXPIRATION = '5m'; // 5 minutes for testing
@@ -1223,3 +1225,44 @@ export const normalizeVersion = (version) => {
   const noPrefix = trimmed.replace(/^v+/, "");
   return `v${noPrefix}`;
 };
+
+export const generateUniqueChangeLogUUID = async () => {
+  let uuid;
+  let exists;
+
+  do {
+    uuid = generatePrefixedId("CL", 7);
+    exists = await ChangeLog.findByUUID(uuid);
+  } while (exists);
+
+  return uuid;
+};
+
+export const cleanTermsForPDF = (text) => {
+  if (!text) return "";
+
+  return text
+    // Remove headings (#, ##, ###)
+    .replace(/^#{1,6}\s*/gm, "")
+    
+    // Remove bullet points (* or -)
+    .replace(/^\s*[\*\-]\s+/gm, "• ")
+    
+    // Remove extra line breaks
+    .replace(/\n{3,}/g, "\n\n")
+    
+    .trim();
+};
+
+export const formatTermsForPDF = (text) => {
+  if (!text) return "";
+
+  return text
+    .replace(/^#\s*(.*)/gm, "\n$1\n") // Main title
+    .replace(/^##\s*(.*)/gm, "\n$1\n") // Section titles
+    .replace(/^###\s*(.*)/gm, "\n$1\n") // Sub sections
+    .replace(/^\s*[\*\-]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+

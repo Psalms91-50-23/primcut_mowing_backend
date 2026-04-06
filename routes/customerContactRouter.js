@@ -5,6 +5,8 @@ import {
   getCustomerContactByUUID,
   updateCustomerContact,
   deleteCustomerContact,
+  findAllByCustomerUUIDIncDelete
+  
 } from "../controllers/customerContactController.js";
 import {
   authRateLimit,
@@ -25,10 +27,12 @@ router.post("/customers/uuid/:uuid/contacts", authenticatedRateLimit, requireAut
 // get contact by customer uuid
 router.get("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]) , getCustomerContactByUUID);
 
+router.get("/customer-contacts/uuid/:uuid/all", findAllByCustomerUUIDIncDelete);
+
 // update one contact by contact uuid
 router.patch("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), updateCustomerContact);
 
 // soft delete one contact by contact uuid
-router.delete("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]),  deleteCustomerContact);
+router.patch("/customer-contacts/uuid/:uuid/soft-delete", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]),  deleteCustomerContact);
 
 export default router;

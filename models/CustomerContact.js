@@ -1,6 +1,6 @@
 import { supabase } from "../config/db.js";
 
-class CustomerContact {
+export default class CustomerContact {
   static tableName = "customer_contacts";
 
   static async create({
@@ -92,6 +92,19 @@ class CustomerContact {
     return data || [];
   }
 
+  static async findAllByCustomerUUIDIncDelete(customer_uuid) {
+    const { data, error } = await supabase()
+      .from(this.tableName)
+      .select("*")
+      .eq("customer_uuid", customer_uuid)
+      // .eq("is_deleted", true)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
   static async updateByUUID(uuid, updates = {}) {
     const now = new Date().toISOString();
 
@@ -112,23 +125,59 @@ class CustomerContact {
     return data;
   }
 
+  // static async softDeleteByUUID(uuid) {
+  //   const now = new Date().toISOString();
+
+  //   const { data, error, count } = await supabase()
+  //     .from(this.tableName)
+  //     .update({
+  //       is_deleted: true,
+  //       deleted_at: now,
+  //       updated_at: now,
+  //     })
+  //     .eq("uuid", uuid)
+  //     .eq("is_deleted", false)
+  //     .select("*")
+  //     .maybeSingle();
+
+  //   if (error) throw new Error(error.message);
+  //   return data;
+  // }
+
   static async softDeleteByUUID(uuid) {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase()
+    const { data, error, count } = await supabase()
       .from(this.tableName)
       .update({
         is_deleted: true,
         deleted_at: now,
         updated_at: now,
-      })
+      }, { count: "exact" })
       .eq("uuid", uuid)
       .eq("is_deleted", false)
       .select("*")
       .maybeSingle();
 
-    if (error) throw new Error(error.message);
-    return data;
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!count || count < 1 || !data) {
+      return {
+        success: false,
+        contact: null,
+        count: count || 0,
+        error: "No non-deleted customer contact was updated",
+      };
+    }
+
+    return {
+      success: true,
+      contact: data,
+      count,
+      error: null,
+    };
   }
 
   static async clearPrimaryForCustomer(customer_uuid, exclude_uuid = null) {
@@ -151,5 +200,3 @@ class CustomerContact {
     return true;
   }
 }
-
-export default CustomerContact;

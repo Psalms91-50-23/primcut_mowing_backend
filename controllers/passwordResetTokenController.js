@@ -8,23 +8,24 @@ import {
   formatFullName,
   verifyRecaptcha,
   generatePrefixedId,
+  generateUniqueChangeLogUUID
 } from "../util/util.js";
 
 /**
  * Safe change log writer
  * Will never break the main request flow if logging fails
  */
-export const generateUniqueChangeLogUUID = async () => {
-  let uuid;
-  let exists;
+// export const generateUniqueChangeLogUUID = async () => {
+//   let uuid;
+//   let exists;
 
-  do {
-    uuid = generatePrefixedId("CL", 7);
-    exists = await ChangeLog.findByUUID(uuid);
-  } while (exists);
+//   do {
+//     uuid = generatePrefixedId("CL", 7);
+//     exists = await ChangeLog.findByUUID(uuid);
+//   } while (exists);
 
-  return uuid;
-};
+//   return uuid;
+// };
 
 // 1️⃣ Request password reset
 export const requestPasswordReset = async (req, res) => {

@@ -1,19 +1,20 @@
-import User from '../models/User.js';
-import Customer from '../models/Customer.js';
-import Employee from '../models/Employee.js';
-import UserLogin from '../models/UserLogin.js';
-import { createChangeLogSafe } from '../util/createChangeLogSafe.js';
-import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
+import User from "../models/User.js";
+import Customer from "../models/Customer.js";
+import Employee from "../models/Employee.js";
+import UserLogin from "../models/UserLogin.js";
+import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import {
   formatFullName,
   EMAIL_TOKEN_EXPIRES_IN,
   getClientIp,
-  generatePrefixedId
-} from '../util/util.js';
-import { supabase, supabaseNonAdmin } from '../config/db.js';
+  generatePrefixedId,
+  generateUniqueChangeLogUUID,
+} from "../util/util.js";
+import { supabase, supabaseNonAdmin } from "../config/db.js";
 import { verifyEmailLink, sendInviteLink } from "../lib/email/index.js";
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -51,7 +52,9 @@ export const registerUser = async (req, res) => {
   }
 
   if (password.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters" });
+    return res
+      .status(400)
+      .json({ error: "Password must be at least 8 characters" });
   }
 
   if (!safeFirstName) {
@@ -197,6 +200,7 @@ export const registerUser = async (req, res) => {
     });
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: actorUserUuid,
@@ -210,6 +214,8 @@ export const registerUser = async (req, res) => {
         customer_uuid: { old: null, new: user.customer_uuid ?? null },
         auth_user_id: { old: null, new: user.auth_user_id },
       },
+      oldData: null,
+      newData: user,
       source: "public_form",
     });
 
@@ -245,7 +251,7 @@ export const registerUser = async (req, res) => {
       error: err.message || "Failed to register user",
     });
   }
-};;
+};
 
 export const login = async (req, res) => {
   const { email, password, recaptchaToken } = req.body;
@@ -363,13 +369,18 @@ export const login = async (req, res) => {
 
     try {
       await createChangeLogSafe({
-        uuid: generatePrefixedId("CL", 7),
+        uuid: await generateUniqueChangeLogUUID(),
         table_name: "users",
         record_uuid: localUser.uuid,
         user_uuid: localUser.uuid,
         action: "login",
-        summary: `User logged in successfully`,
-        changed_fields: ["last_logged_in_at"],
+        summary: "User logged in successfully",
+        changed_fields: {
+          last_logged_in_at: {
+            old: localUser.last_logged_in_at ?? null,
+            new: new Date().toISOString(),
+          },
+        },
         oldData: null,
         newData: {
           email: localUser.email,
@@ -388,8 +399,8 @@ export const login = async (req, res) => {
     const isStaffRole = ["admin", "owner", "employee"].includes(localUser.role);
 
     const accessTokenMaxAge = isStaffRole
-      ? 1000 * 60 * 60 * 24 // 1 day
-      : 1000 * 60 * 60 * 2; // 2 hours
+      ? 1000 * 60 * 60 * 24 //1 day for staff
+      : 1000 * 60 * 30; //30 mins
 
     res.cookie("accessToken", session.access_token, {
       httpOnly: true,
@@ -460,162 +471,6 @@ export const login = async (req, res) => {
   }
 };
 
-// export const login = async (req, res) => {
-//   const { email, password, recaptchaToken } = req.body;
-
-//   if (!email || !password) {
-//     return res.status(400).json({ error: "Email and password are required" });
-//   }
-
-//   if (!recaptchaToken) {
-//     return res.status(400).json({ error: "reCAPTCHA token is missing" });
-//   }
-
-//   const ipAddress = getClientIp(req);
-//   const userAgent = req.headers['user-agent'] || '';
-
-//   try {
-//     const recaptchaSecret = process.env.RECAPTCHA_V3_SECRET_KEY;
-
-//     const recaptchaRes = await fetch(
-//       `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`,
-//       {
-//         method: "POST",
-//         headers: { "Content-Type": "application/x-www-form-urlencoded" }
-//       }
-//     );
-
-//     const recaptchaData = await recaptchaRes.json();
-
-//     if (recaptchaData.action && recaptchaData.action !== "login") {
-//       return res.status(400).json({ error: "reCAPTCHA action mismatch" });
-//     }
-
-//     if (!recaptchaData.success || (recaptchaData.score && recaptchaData.score < 0.5)) {
-//       return res.status(403).json({
-//         error: "reCAPTCHA verification failed. Suspicious activity detected.",
-//         recaptcha: recaptchaData,
-//       });
-//     }
-
-//     const { data, error } = await supabaseNonAdmin().auth.signInWithPassword({
-//       email: email.toLowerCase().trim(),
-//       password,
-//     });
-
-//     if (error) {
-//       if (error.code === "email_not_confirmed") {
-//         return res.status(403).json({
-//           error: "Please confirm your email before logging in",
-//           code: "EMAIL_NOT_CONFIRMED",
-//         });
-//       }
-
-//       return res.status(401).json({
-//         error: error.message || "Invalid email or password",
-//         code: error.code || "LOGIN_FAILED",
-//       });
-//     }
-
-//     const authUser = data.user;
-
-//     let localUser = await User.findByAuthID(authUser.id);
-//     if (!localUser) {
-//       return res.status(404).json({ error: "User record not found" });
-//     }
-
-//     if (authUser.email_confirmed_at && !localUser.is_email_verified) {
-//       await User.markVerified(authUser.id);
-//       localUser = await User.findByAuthID(authUser.id);
-//     }
-
-//     if (!localUser.is_email_verified || !authUser.email_confirmed_at) {
-//       return res.status(403).json({
-//         error: "Email not verified",
-//         code: "EMAIL_NOT_VERIFIED",
-//       });
-//     }
-
-//     let loginUUID;
-//     let exists;
-//     do {
-//       loginUUID = generatePrefixedId("L", 8);
-//       exists = await UserLogin.findByUUID(loginUUID);
-//     } while (exists);
-
-//     try {
-//       const userLogin = await UserLogin.create({
-//         uuid: loginUUID,
-//         user_uuid: localUser.uuid,
-//         ip_address: ipAddress,
-//         user_agent: userAgent,
-//         success: true,
-//       });
-//       console.log({userLogin})
-//     } catch (logErr) {
-//       console.error("UserLogin.create failed:", logErr);
-//     }
-//     const isStaffRole = ["admin", "owner", "employee"].includes(localUser.role);
-    
-//     const accessTokenMaxAge = isStaffRole
-//       ? 1000 * 60 * 60 * 24 // 1 day
-//       : 1000 * 60 * 60 * 2 ; // 2 hours
-
-//     res.cookie("accessToken", data.session.access_token, {
-//       httpOnly: true,
-//       secure: process.env.NODE_ENV === "production",
-//       sameSite: "lax",
-//       maxAge: accessTokenMaxAge,
-//       path: "/",
-//     });
-
-//     res.cookie("refreshToken", data.session.refresh_token, {
-//       httpOnly: true,
-//       secure: process.env.NODE_ENV === "production",
-//       sameSite: "lax",
-//       maxAge: 1000 * 60 * 60 * 24 * 7,
-//       path: "/",
-//     });
-
-//     res.cookie("role", localUser.role, {
-//       httpOnly: true,
-//       secure: process.env.NODE_ENV === "production",
-//       sameSite: "lax",
-//       maxAge: accessTokenMaxAge,
-//       path: "/",
-//     });
-
-//     const updatedUser = await User.updateByUUID(localUser.uuid, {
-//       last_logged_in_at: new Date().toISOString(),
-//     });
-
-//     if (!updatedUser) {
-//       return res.status(500).json({ error: "Failed to update last login time" });
-//     }
-
-//     return res.status(200).json({
-//       message: "Login successful",
-//       user: {
-//         uuid: localUser.uuid,
-//         email: localUser.email,
-//         first_name: localUser.first_name,
-//         last_name: localUser.last_name,
-//         role: localUser.role,
-//         customer_uuid: localUser.customer_uuid ?? null,
-//         supabaseUser: {
-//           id: authUser.id,
-//           email: authUser.email,
-//           email_confirmed_at: authUser.email_confirmed_at,
-//           user_metadata: authUser.user_metadata,
-//         },
-//       },
-//     });
-//   } catch (err) {
-//     console.error("Login error:", err);
-//     return res.status(500).json({ error: err.message || "Internal server error" });
-//   }
-// };
-
 export const logout = async (req, res) => {
   try {
     const accessToken = req.cookies?.accessToken;
@@ -674,12 +529,15 @@ export const getCurrentUser = async (req, res) => {
 
     if (error || !data?.user) {
       if (!refreshToken) {
-        return res.status(401).json({ error: "Access token expired, please log in again" });
+        return res
+          .status(401)
+          .json({ error: "Access token expired, please log in again" });
       }
 
-      const { data: refreshData, error: refreshError } = await supabase().auth.refreshSession({
-        refresh_token: refreshToken,
-      });
+      const { data: refreshData, error: refreshError } =
+        await supabase().auth.refreshSession({
+          refresh_token: refreshToken,
+        });
 
       if (refreshError || !refreshData?.session) {
         return res.status(401).json({ error: "Refresh failed, please log in again" });
@@ -741,37 +599,6 @@ export const getCurrentUser = async (req, res) => {
   }
 };
 
-// export const getCurrentCustomer = async (req, res) => {
-//   try {
-//     if (!req.user?.uuid) {
-//       return res.status(401).json({ error: "Unauthorized" });
-//     }
-
-//     if (req.user.role !== "customer") {
-//       return res.status(403).json({ error: "Only customers can access this route" });
-//     }
-
-//     if (!req.user.customer_uuid) {
-//       return res.status(404).json({ error: "No customer profile linked to this user" });
-//     }
-
-//     const customer = await Customer.findByUUID(req.user.customer_uuid);
-
-//     if (!customer) {
-//       return res.status(404).json({ error: "Customer not found" });
-//     }
-
-//     return res.status(200).json({
-//       customer,
-//     });
-//   } catch (err) {
-//     console.error("getCurrentCustomer error:", err);
-//     return res.status(500).json({
-//       error: err.message || "Internal server error",
-//     });
-//   }
-// };
-
 export const verifyEmail = async (req, res) => {
   const token = req.body?.token || req.query?.token;
 
@@ -825,6 +652,7 @@ export const verifyEmail = async (req, res) => {
     }
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: null,
@@ -835,6 +663,8 @@ export const verifyEmail = async (req, res) => {
         auth_user_id: { old: user.auth_user_id, new: user.auth_user_id },
         verification_method: { old: null, new: "email_link" },
       },
+      oldData: user,
+      newData: verifiedUser,
       source: "system",
     });
 
@@ -843,8 +673,10 @@ export const verifyEmail = async (req, res) => {
       let customerCreated = false;
 
       const normalizedEmail = verifiedUser.email?.trim().toLowerCase() || null;
-      const normalizedFirstName = verifiedUser.first_name?.trim().toLowerCase() || null;
-      const normalizedLastName = verifiedUser.last_name?.trim().toLowerCase() || null;
+      const normalizedFirstName =
+        verifiedUser.first_name?.trim().toLowerCase() || null;
+      const normalizedLastName =
+        verifiedUser.last_name?.trim().toLowerCase() || null;
 
       if (verifiedUser.customer_uuid) {
         linkedCustomer = await Customer.findByUUID(verifiedUser.customer_uuid);
@@ -878,6 +710,7 @@ export const verifyEmail = async (req, res) => {
         customerCreated = true;
 
         await createChangeLogSafe({
+          uuid: await generateUniqueChangeLogUUID(),
           table_name: "customers",
           record_uuid: linkedCustomer.uuid,
           user_uuid: null,
@@ -890,11 +723,14 @@ export const verifyEmail = async (req, res) => {
             email: { old: null, new: linkedCustomer.email ?? null },
             created_via: { old: null, new: linkedCustomer.created_via ?? null },
           },
+          oldData: null,
+          newData: linkedCustomer,
           source: "system",
         });
       } else {
         const customerUpdates = {};
         const customerChangedFields = {};
+        const existingCustomerBeforeUpdate = { ...linkedCustomer };
 
         if (!linkedCustomer.first_name && normalizedFirstName) {
           customerUpdates.first_name = normalizedFirstName;
@@ -921,15 +757,21 @@ export const verifyEmail = async (req, res) => {
         }
 
         if (Object.keys(customerUpdates).length > 0) {
-          linkedCustomer = await Customer.updateByUUID(linkedCustomer.uuid, customerUpdates);
+          linkedCustomer = await Customer.updateByUUID(
+            linkedCustomer.uuid,
+            customerUpdates
+          );
 
           await createChangeLogSafe({
+            uuid: await generateUniqueChangeLogUUID(),
             table_name: "customers",
             record_uuid: linkedCustomer.uuid,
             user_uuid: null,
             action: "update",
             summary: "Customer details enriched during email verification",
             changed_fields: customerChangedFields,
+            oldData: existingCustomerBeforeUpdate,
+            newData: linkedCustomer,
             source: "system",
           });
         }
@@ -937,6 +779,7 @@ export const verifyEmail = async (req, res) => {
 
       if (linkedCustomer?.uuid && verifiedUser.customer_uuid !== linkedCustomer.uuid) {
         const beforeCustomerUuid = verifiedUser.customer_uuid ?? null;
+        const verifiedUserBeforeLink = { ...verifiedUser };
 
         verifiedUser = await User.updateByUUID(verifiedUser.uuid, {
           customer_uuid: linkedCustomer.uuid,
@@ -947,6 +790,7 @@ export const verifyEmail = async (req, res) => {
         }
 
         await createChangeLogSafe({
+          uuid: await generateUniqueChangeLogUUID(),
           table_name: "users",
           record_uuid: verifiedUser.uuid,
           user_uuid: null,
@@ -960,6 +804,8 @@ export const verifyEmail = async (req, res) => {
               new: linkedCustomer.uuid,
             },
           },
+          oldData: verifiedUserBeforeLink,
+          newData: verifiedUser,
           source: "system",
         });
       }
@@ -987,18 +833,18 @@ export const resendVerificationEmail = async (req, res) => {
   const { email } = req.body;
   const actorUserUuid = req.user?.uuid || null;
 
-  if (!email) return res.status(400).json({ error: 'Email is required' });
+  if (!email) return res.status(400).json({ error: "Email is required" });
 
   try {
     const user = await User.findByEmail(email);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     if (user.is_email_verified) {
-      return res.status(400).json({ error: 'User is already verified' });
+      return res.status(400).json({ error: "User is already verified" });
     }
 
     const emailToken = jwt.sign(
-      { user_uuid: user.uuid, email: user.email, purpose: 'email_verification' },
+      { user_uuid: user.uuid, email: user.email, purpose: "email_verification" },
       process.env.EMAIL_TOKEN_SECRET,
       { expiresIn: EMAIL_TOKEN_EXPIRES_IN }
     );
@@ -1013,20 +859,29 @@ export const resendVerificationEmail = async (req, res) => {
     });
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: actorUserUuid,
       action: "update",
       summary: "Verification email resent",
       changed_fields: {
+        verification_email_resent: {
+          old: false,
+          new: true,
+        },
+      },
+      oldData: user,
+      newData: {
+        ...user,
         verification_email_resent: true,
       },
       source: actorUserUuid ? "dashboard" : "public_form",
     });
 
     return res.status(200).json({
-      message: 'Verification email sent',
-      verifyLink: process.env.NODE_ENV !== 'production' ? verifyLink : undefined,
+      message: "Verification email sent",
+      verifyLink: process.env.NODE_ENV !== "production" ? verifyLink : undefined,
     });
   } catch (err) {
     console.error("Resend verification error full:", err);
@@ -1040,7 +895,7 @@ export const deleteSupabaseUser = async (req, res) => {
   const { authUserId } = req.params;
 
   if (!authUserId) {
-    return res.status(400).json({ error: 'Missing authUserId' });
+    return res.status(400).json({ error: "Missing authUserId" });
   }
 
   try {
@@ -1050,7 +905,10 @@ export const deleteSupabaseUser = async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    return res.status(200).json({ message: `Supabase() user ${authUserId} deleted successfully`, data });
+    return res.status(200).json({
+      message: `Supabase() user ${authUserId} deleted successfully`,
+      data,
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -1061,16 +919,20 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
   const actorUserUuid = req.user?.uuid || null;
 
   if (!authUserId) {
-    return res.status(400).json({ error: 'Missing authUserId' });
+    return res.status(400).json({ error: "Missing authUserId" });
   }
 
   try {
     const user = await User.findByAuthID(authUserId);
     if (!user) {
-      return res.status(400).json({ error: `User not found with authUserId: ${authUserId}` });
+      return res
+        .status(400)
+        .json({ error: `User not found with authUserId: ${authUserId}` });
     }
 
-    const { error: supabaseError } = await supabase().auth.admin.deleteUser(authUserId);
+    const { error: supabaseError } = await supabase().auth.admin.deleteUser(
+      authUserId
+    );
 
     if (supabaseError) {
       return res.status(400).json({ error: supabaseError.message });
@@ -1078,10 +940,13 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
 
     const userDeleted = await User.hardDeleteFull(user.uuid);
     if (!userDeleted) {
-      return res.status(400).json({ error: `User not found with User uuid: ${user.uuid}` });
+      return res
+        .status(400)
+        .json({ error: `User not found with User uuid: ${user.uuid}` });
     }
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: actorUserUuid,
@@ -1089,19 +954,24 @@ export const deleteSupabaseAndDBUsers = async (req, res) => {
       summary: "User deleted from Supabase() and local DB",
       changed_fields: {
         deleted_record: {
-          uuid: user.uuid,
-          auth_user_id: user.auth_user_id,
-          email: user.email,
-          role: user.role,
-          customer_uuid: user.customer_uuid,
+          old: {
+            uuid: user.uuid,
+            auth_user_id: user.auth_user_id,
+            email: user.email,
+            role: user.role,
+            customer_uuid: user.customer_uuid,
+          },
+          new: null,
         },
       },
+      oldData: user,
+      newData: null,
       source: "dashboard",
     });
 
     return res.status(200).json({
       message: `Supabase() user ${authUserId} deleted successfully`,
-      data: userDeleted
+      data: userDeleted,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1113,18 +983,19 @@ export const verifyUser = async (req, res) => {
   const actorUserUuid = req.user?.uuid || null;
 
   if (!authUserId) {
-    return res.status(400).json({ error: 'auth_user_id is required' });
+    return res.status(400).json({ error: "auth_user_id is required" });
   }
 
   try {
     const exists = await User.findByAuthID(authUserId);
     if (!exists) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
-    const { data: authUser, error: authError } = await supabase().auth.admin.updateUserById(authUserId, {
-      email_confirm: true
-    });
+    const { data: authUser, error: authError } =
+      await supabase().auth.admin.updateUserById(authUserId, {
+        email_confirm: true,
+      });
 
     if (authError) {
       return res.status(400).json({ error: authError.message });
@@ -1133,6 +1004,7 @@ export const verifyUser = async (req, res) => {
     const user = await User.markVerified(authUserId);
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: actorUserUuid,
@@ -1144,13 +1016,15 @@ export const verifyUser = async (req, res) => {
           new: user.is_email_verified ?? true,
         },
       },
+      oldData: exists,
+      newData: user,
       source: "dashboard",
     });
 
     return res.status(200).json({
-      message: 'User email verified successfully',
+      message: "User email verified successfully",
       user,
-      supbaseUser: authUser
+      supbaseUser: authUser,
     });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -1164,12 +1038,13 @@ export const deleteUser = async (req, res) => {
   try {
     const existing = await User.findByUUID(uuid, { includeDeleted: true });
     if (!existing) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
 
     const deleted = await User.softDelete(uuid);
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -1185,10 +1060,12 @@ export const deleteUser = async (req, res) => {
           new: deleted?.deleted_at ?? new Date().toISOString(),
         },
       },
+      oldData: existing,
+      newData: deleted,
       source: "dashboard",
     });
 
-    return res.status(200).json({ message: 'User deleted' });
+    return res.status(200).json({ message: "User deleted" });
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -1226,7 +1103,10 @@ export const updateUser = async (req, res) => {
 
     const changed_fields = {};
     for (const key of Object.keys(updates || {})) {
-      if (JSON.stringify(existing?.[key] ?? null) !== JSON.stringify(updatedUser?.[key] ?? null)) {
+      if (
+        JSON.stringify(existing?.[key] ?? null) !==
+        JSON.stringify(updatedUser?.[key] ?? null)
+      ) {
         changed_fields[key] = {
           old: existing?.[key] ?? null,
           new: updatedUser?.[key] ?? null,
@@ -1236,12 +1116,15 @@ export const updateUser = async (req, res) => {
 
     if (Object.keys(changed_fields).length > 0) {
       await createChangeLogSafe({
+        uuid: await generateUniqueChangeLogUUID(),
         table_name: "users",
         record_uuid: uuid,
         user_uuid: actorUserUuid,
         action: "update",
         summary: "User updated",
         changed_fields,
+        oldData: existing,
+        newData: updatedUser,
         source: "dashboard",
       });
     }
@@ -1268,11 +1151,12 @@ export const hardDeleteFull = async (req, res) => {
 
     await UserLogin.deleteByUUID(user.uuid);
 
-    const { data: authUser, error: authError } = await supabase().auth.admin.deleteUser(user.auth_user_id);
+    const { data: authUser, error: authError } =
+      await supabase().auth.admin.deleteUser(user.auth_user_id);
     if (authError) {
       return res.status(400).json({
         error: authError.message,
-        message: "User deleted from local DB but failed to delete from Supabase() Auth"
+        message: "User deleted from local DB but failed to delete from Supabase() Auth",
       });
     }
 
@@ -1280,16 +1164,21 @@ export const hardDeleteFull = async (req, res) => {
     if (user.customer_uuid) {
       deletedCustomer = await Customer.delete(user.customer_uuid);
       if (!deletedCustomer) {
-        return res.status(500).json({ error: "Failed to hard delete customer from local DB" });
+        return res
+          .status(500)
+          .json({ error: "Failed to hard delete customer from local DB" });
       }
     }
 
     const deletedUser = await User.hardDeleteFull(uuid);
     if (!deletedUser) {
-      return res.status(500).json({ error: "Failed to hard delete user from local DB" });
+      return res
+        .status(500)
+        .json({ error: "Failed to hard delete user from local DB" });
     }
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -1297,20 +1186,25 @@ export const hardDeleteFull = async (req, res) => {
       summary: "User fully hard deleted",
       changed_fields: {
         deleted_record: {
-          uuid: user.uuid,
-          auth_user_id: user.auth_user_id,
-          email: user.email,
-          customer_uuid: user.customer_uuid,
-          role: user.role,
+          old: {
+            uuid: user.uuid,
+            auth_user_id: user.auth_user_id,
+            email: user.email,
+            customer_uuid: user.customer_uuid,
+            role: user.role,
+          },
+          new: null,
         },
       },
+      oldData: user,
+      newData: null,
       source: "dashboard",
     });
 
     return res.status(200).json({
-      message: 'User hard deleted successfully',
+      message: "User hard deleted successfully",
       deletedUser,
-      supabaseDeletion: authUser
+      supabaseDeletion: authUser,
     });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -1346,6 +1240,7 @@ export const hardDeleteUserLocally = async (req, res) => {
     const deletedUser = await User.hardDeleteLocalTable(uuid);
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -1353,18 +1248,23 @@ export const hardDeleteUserLocally = async (req, res) => {
       summary: "User hard deleted from local DB only",
       changed_fields: {
         deleted_record: {
-          uuid: user.uuid,
-          auth_user_id: user.auth_user_id,
-          email: user.email,
-          role: user.role,
+          old: {
+            uuid: user.uuid,
+            auth_user_id: user.auth_user_id,
+            email: user.email,
+            role: user.role,
+          },
+          new: null,
         },
       },
+      oldData: user,
+      newData: null,
       source: "dashboard",
     });
 
     return res.status(200).json({
-      message: 'User hard deleted from local DB successfully',
-      data: deletedUser
+      message: "User hard deleted from local DB successfully",
+      data: deletedUser,
     });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -1381,7 +1281,9 @@ export const getUserByEmail = async (req, res) => {
     const user = await User.findByEmail(email);
 
     if (!user) {
-      return res.status(404).json({ error: `User not found by Email: ${email}` });
+      return res
+        .status(404)
+        .json({ error: `User not found by Email: ${email}` });
     }
 
     return res.status(200).json({ user });
@@ -1410,7 +1312,9 @@ export const deleteUserByEmail = async (req, res) => {
     const userId = users[0].id;
     await supabase().auth.admin.deleteUser(userId);
 
-    return res.status(200).json({ message: "User deleted successfully", data: users });
+    return res
+      .status(200)
+      .json({ message: "User deleted successfully", data: users });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -1505,7 +1409,9 @@ export const resetPassword = async (req, res) => {
     return res.status(400).json({ error: "Invalid or expired token" });
   }
 
-  await supabase().auth.admin.updateUserById(record.user_id, { password: newPassword });
+  await supabase().auth.admin.updateUserById(record.user_id, {
+    password: newPassword,
+  });
 
   await supabase()
     .from("password_reset_tokens")
@@ -1546,7 +1452,7 @@ export const createUserEmptyEmployee = async (req, res) => {
     employeeEmail,
     employeeAddress,
     employeeLandLine,
-    employeeMobile
+    employeeMobile,
   } = req.body;
 
   if (!businessEmail) {
@@ -1562,9 +1468,13 @@ export const createUserEmptyEmployee = async (req, res) => {
       return res.status(409).json({ message: "Email already exists in DB." });
     }
 
-    const { data: existingUsers } = await supabase().auth.admin.listUsers({ email: normalizedEmail });
+    const { data: existingUsers } = await supabase().auth.admin.listUsers({
+      email: normalizedEmail,
+    });
     if (existingUsers?.length) {
-      return res.status(409).json({ message: "Email already registered in Supabase()." });
+      return res
+        .status(409)
+        .json({ message: "Email already registered in Supabase()." });
     }
 
     let uuid, exists;
@@ -1580,7 +1490,7 @@ export const createUserEmptyEmployee = async (req, res) => {
       first_name: employeeFirstName?.toLowerCase() ?? "",
       last_name: employeeLastName?.toLowerCase() ?? "",
       role: finalRole,
-      uuid
+      uuid,
     });
 
     let employeeUuid, employeeExists;
@@ -1615,19 +1525,23 @@ export const createUserEmptyEmployee = async (req, res) => {
       employee_termination_date: null,
       is_deleted: false,
       deleted_at: null,
-      deleted_by_user_uuid: null
+      deleted_by_user_uuid: null,
     };
 
     const newEmployeeAdded = await Employee.create(newEmployee);
     if (!newEmployeeAdded) {
-      return res.status(400).json({ message: "Failed to create a new employee." });
+      return res
+        .status(400)
+        .json({ message: "Failed to create a new employee." });
     }
 
     const { data: supabaseData, error: supabaseError } =
       await supabase().auth.admin.generateLink({
         type: "invite",
         email: normalizedEmail,
-        options: { redirectTo: `${process.env.FRONTEND_URL_HAPPY_PROPERTY}/user/set-password` }
+        options: {
+          redirectTo: `${process.env.FRONTEND_URL_HAPPY_PROPERTY}/user/set-password`,
+        },
       });
 
     if (supabaseError) {
@@ -1642,10 +1556,11 @@ export const createUserEmptyEmployee = async (req, res) => {
       firstName: employeeFirstName,
       lastName: employeeLastName,
       inviteLink,
-      expiryHours: 24
+      expiryHours: 24,
     });
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "users",
       record_uuid: user.uuid,
       user_uuid: createdByUserUUID || null,
@@ -1658,10 +1573,13 @@ export const createUserEmptyEmployee = async (req, res) => {
         last_name: { old: null, new: user.last_name },
         role: { old: null, new: user.role },
       },
+      oldData: null,
+      newData: user,
       source: "dashboard",
     });
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "employees",
       record_uuid: newEmployeeAdded.uuid,
       user_uuid: createdByUserUUID || null,
@@ -1671,12 +1589,29 @@ export const createUserEmptyEmployee = async (req, res) => {
         uuid: { old: null, new: newEmployeeAdded.uuid },
         user_uuid: { old: null, new: newEmployeeAdded.user_uuid },
         business_email: { old: null, new: newEmployeeAdded.business_email },
-        employee_first_name: { old: null, new: newEmployeeAdded.employee_first_name },
-        employee_last_name: { old: null, new: newEmployeeAdded.employee_last_name },
-        employee_job_title: { old: null, new: newEmployeeAdded.employee_job_title },
-        employee_department: { old: null, new: newEmployeeAdded.employee_department },
-        employee_contract: { old: null, new: newEmployeeAdded.employee_contract },
+        employee_first_name: {
+          old: null,
+          new: newEmployeeAdded.employee_first_name,
+        },
+        employee_last_name: {
+          old: null,
+          new: newEmployeeAdded.employee_last_name,
+        },
+        employee_job_title: {
+          old: null,
+          new: newEmployeeAdded.employee_job_title,
+        },
+        employee_department: {
+          old: null,
+          new: newEmployeeAdded.employee_department,
+        },
+        employee_contract: {
+          old: null,
+          new: newEmployeeAdded.employee_contract,
+        },
       },
+      oldData: null,
+      newData: newEmployeeAdded,
       source: "dashboard",
     });
 
@@ -1684,9 +1619,8 @@ export const createUserEmptyEmployee = async (req, res) => {
       message: "User and employee created and invite sent successfully",
       userUuid: user.uuid,
       user,
-      employee: newEmployeeAdded
+      employee: newEmployeeAdded,
     });
-
   } catch (error) {
     console.error("Error creating user:", error);
     return res.status(500).json({ message: "Internal server error" });

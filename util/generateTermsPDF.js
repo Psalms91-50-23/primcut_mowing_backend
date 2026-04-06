@@ -7,6 +7,7 @@ import fs from "fs";
  * @param {string} version - version string
  * @returns {Promise<Buffer>} - PDF buffer
  */
+
 export const generateTermsPDF = async (content, version) => {
   if (typeof content !== "string") {
     throw new Error("generateTermsPDF requires content to be a string");

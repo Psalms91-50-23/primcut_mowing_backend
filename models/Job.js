@@ -3,28 +3,267 @@ import { obfuscateName, obfuscateAddress } from "../util/util.js";
 import crypto from "crypto";
 import { buildSearchOr, clampInt } from '../util/util.js';
 
-// function clampInt(n, fallback, min, max) {
-//   const x = parseInt(String(n), 10);
-//   if (Number.isNaN(x)) return fallback;
-//   return Math.min(Math.max(x, min), max);
-// }
-
-// function buildSearchOr(terms, columns) {
-//   const filters = [];
-
-//   for (const rawTerm of terms) {
-//     const term = String(rawTerm || "").trim().replace(/,/g, "");
-//     if (!term) continue;
-
-//     for (const column of columns) {
-//       filters.push(`${column}.ilike.%${term}%`);
-//     }
-//   }
-
-//   return filters.join(",");
-// }
-
 export default class Job {
+
+  static async listScheduledOccurrences({
+    scheduledPreset,
+    scheduledStart,
+    scheduledEnd,
+    limit = 100,
+    page = 1,
+  } = {}) {
+    const safeLimit = clampInt(limit, 100, 1, 500);
+    const safePage = clampInt(page, 1, 1, 999999);
+
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
+    const normalizedPreset =
+      typeof scheduledPreset === "string" && scheduledPreset.trim()
+        ? scheduledPreset.trim().toLowerCase()
+        : null;
+
+    let rangeStart = null;
+    let rangeEnd = null;
+
+    const startOfDay = (date) => {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    const endOfDay = (date) => {
+      const d = new Date(date);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    };
+
+    const addDays = (date, days) => {
+      const d = new Date(date);
+      d.setDate(d.getDate() + days);
+      return d;
+    };
+
+    const today = new Date();
+
+    if (normalizedPreset === "today") {
+      rangeStart = startOfDay(today).toISOString();
+      rangeEnd = endOfDay(today).toISOString();
+    } else if (normalizedPreset === "day_prior") {
+      const tomorrow = addDays(today, 1);
+      rangeStart = startOfDay(tomorrow).toISOString();
+      rangeEnd = endOfDay(tomorrow).toISOString();
+    } else if (normalizedPreset === "seven_days_prior") {
+      const sevenDays = addDays(today, 7);
+      rangeStart = startOfDay(sevenDays).toISOString();
+      rangeEnd = endOfDay(sevenDays).toISOString();
+    } else {
+      if (scheduledStart) {
+        rangeStart = startOfDay(scheduledStart).toISOString();
+      }
+      if (scheduledEnd) {
+        rangeEnd = endOfDay(scheduledEnd).toISOString();
+      }
+    }
+
+    // 1) Non-recurring scheduled jobs from jobs table
+    let jobsQuery = supabase()
+      .from("jobs")
+      .select(
+        `
+        uuid,
+        status,
+        scheduled_at,
+        created_at,
+        updated_at,
+        subtotal_amount,
+        gst_amount,
+        total_amount,
+        has_urgent_fee,
+        urgent_fee_amount,
+        job_address,
+        is_recurring,
+        recurrence_frequency,
+        recurrence_interval,
+        recurrence_end_date,
+        services,
+        quote:quotes (
+          uuid,
+          contact_first_name,
+          contact_last_name,
+          contact_email
+        ),
+        customer:customers (
+          uuid,
+          first_name,
+          last_name,
+          email,
+          mobile_phone,
+          landline_phone
+        )
+        `
+      )
+      .eq("is_deleted", false)
+      .eq("is_completed", false)
+      .not("status", "in", '("completed","cancelled")')
+      .eq("is_recurring", false)
+      .not("scheduled_at", "is", null);
+
+    if (rangeStart) jobsQuery = jobsQuery.gte("scheduled_at", rangeStart);
+    if (rangeEnd) jobsQuery = jobsQuery.lte("scheduled_at", rangeEnd);
+
+    const { data: baseJobs, error: baseJobsError } = await jobsQuery;
+
+    if (baseJobsError) {
+      throw new Error(`Error fetching scheduled jobs: ${baseJobsError.message}`);
+    }
+
+    // 2) Recurring occurrences from job_recurrences joined to parent jobs
+    let recurrenceQuery = supabase()
+      .from("job_recurrences")
+      .select(
+        `
+        id,
+        uuid,
+        job_uuid,
+        scheduled_at,
+        status,
+        is_completed,
+        is_deleted,
+        completed_date,
+        scheduled_window_mins,
+        scheduled_window_preset,
+        created_at,
+        updated_at,
+        services,
+        subtotal_amount,
+        gst_amount,
+        total_amount,
+        jobs!inner (
+          uuid,
+          status,
+          created_at,
+          updated_at,
+          subtotal_amount,
+          gst_amount,
+          total_amount,
+          has_urgent_fee,
+          urgent_fee_amount,
+          job_address,
+          is_recurring,
+          recurrence_frequency,
+          recurrence_interval,
+          recurrence_end_date,
+          services,
+          is_deleted,
+          is_completed,
+          quote:quotes (
+            uuid,
+            contact_first_name,
+            contact_last_name,
+            contact_email
+          ),
+          customer:customers (
+            uuid,
+            first_name,
+            last_name,
+            email,
+            mobile_phone,
+            landline_phone
+          )
+        )
+        `
+      )
+      .eq("is_deleted", false)
+      .eq("is_completed", false)
+      .not("status", "in", '("completed","missed")')
+      .eq("jobs.is_deleted", false)
+      .eq("jobs.is_recurring", true)
+      .not("scheduled_at", "is", null);
+
+    if (rangeStart) recurrenceQuery = recurrenceQuery.gte("scheduled_at", rangeStart);
+    if (rangeEnd) recurrenceQuery = recurrenceQuery.lte("scheduled_at", rangeEnd);
+
+    const { data: recurrenceRows, error: recurrenceError } = await recurrenceQuery;
+
+    if (recurrenceError) {
+      throw new Error(
+        `Error fetching recurring scheduled jobs: ${recurrenceError.message}`
+      );
+    }
+
+    const flattenedBaseJobs = (baseJobs || []).map((job) => ({
+      kind: "job",
+      job_uuid: job.uuid,
+      recurrence_uuid: null,
+      recurrence_id: null,
+      uuid: job.uuid,
+      status: job.status,
+      scheduled_at: job.scheduled_at,
+      created_at: job.created_at || null,
+      updated_at: job.updated_at || null,
+      subtotal_amount: job.subtotal_amount ?? 0,
+      gst_amount: job.gst_amount ?? 0,
+      total_amount: job.total_amount ?? 0,
+      has_urgent_fee: Boolean(job.has_urgent_fee),
+      urgent_fee_amount: Number(job.urgent_fee_amount ?? 0),
+      address: job.job_address || null,
+      job_address: job.job_address || null,
+      is_recurring: false,
+      recurrence_frequency: job.recurrence_frequency || null,
+      recurrence_interval: job.recurrence_interval || null,
+      recurrence_end_date: job.recurrence_end_date || null,
+      schedule_label: null,
+      services: job.services || [],
+      quote: job.quote || null,
+      customer: job.customer || null,
+    }));
+
+    const flattenedRecurrences = (recurrenceRows || []).map((row) => ({
+      kind: "recurrence",
+      job_uuid: row.job_uuid,
+      recurrence_uuid: row.uuid,
+      recurrence_id: row.id,
+      uuid: row.jobs?.uuid || row.job_uuid,
+      status: row.status || "scheduled",
+      scheduled_at: row.scheduled_at,
+      created_at: row.created_at || row.jobs?.created_at || null,
+      updated_at: row.updated_at || row.jobs?.updated_at || null,
+      subtotal_amount: row.subtotal_amount ?? row.jobs?.subtotal_amount ?? 0,
+      gst_amount: row.gst_amount ?? row.jobs?.gst_amount ?? 0,
+      total_amount: row.total_amount ?? row.jobs?.total_amount ?? 0,
+      has_urgent_fee: Boolean(row.jobs?.has_urgent_fee),
+      urgent_fee_amount: Number(row.jobs?.urgent_fee_amount ?? 0),
+      address: row.jobs?.job_address || null,
+      job_address: row.jobs?.job_address || null,
+      is_recurring: true,
+      recurrence_frequency: row.jobs?.recurrence_frequency || null,
+      recurrence_interval: row.jobs?.recurrence_interval || null,
+      recurrence_end_date: row.jobs?.recurrence_end_date || null,
+      schedule_label: null,
+      services: row.services || row.jobs?.services || [],
+      quote: row.jobs?.quote || null,
+      customer: row.jobs?.customer || null,
+    }));
+
+    const merged = [...flattenedBaseJobs, ...flattenedRecurrences].sort((a, b) => {
+      const aTime = new Date(a.scheduled_at || 0).getTime();
+      const bTime = new Date(b.scheduled_at || 0).getTime();
+      return aTime - bTime;
+    });
+
+    const total = merged.length;
+    const paged = merged.slice(from, to + 1);
+
+    return {
+      jobs: paged,
+      total,
+      totalCount: total,
+      page: safePage,
+      totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+      limit: safeLimit,
+    };
+  }
 
   static async findJobByCustomerUUID(customerUuid) {
     if (!customerUuid) return [];
@@ -599,76 +838,79 @@ export default class Job {
         if (error) throw new Error(`Error fetching job with quote UUID ${quote_uuid}: ${error.message}`);
         return data;
     }
-    static async list({ status, limit = 5, page = 1, olderThanDays = null }) {
-    const safeLimit = clampInt(limit, 5, 1, 50);
-    const safePage = clampInt(page, 1, 1, 999999);
 
-    const hasOlderThanFilter =
-        olderThanDays !== null &&
-        olderThanDays !== undefined &&
-        olderThanDays !== "" &&
-        !Number.isNaN(Number(olderThanDays));
+  //   static async list({ status, limit = 5, page = 1, olderThanDays = null }) {
+  //   const safeLimit = clampInt(limit, 5, 1, 50);
+  //   const safePage = clampInt(page, 1, 1, 999999);
 
-    const safeOlder = hasOlderThanFilter
-        ? clampInt(olderThanDays, 30, 0, 3650)
-        : null;
+  //   const hasOlderThanFilter =
+  //       olderThanDays !== null &&
+  //       olderThanDays !== undefined &&
+  //       olderThanDays !== "" &&
+  //       !Number.isNaN(Number(olderThanDays));
 
-    const from = (safePage - 1) * safeLimit;
-    const to = from + safeLimit - 1;
+  //   const safeOlder = hasOlderThanFilter
+  //       ? clampInt(olderThanDays, 30, 0, 3650)
+  //       : null;
 
-    const olderThanIso =
-        safeOlder !== null && safeOlder > 0
-            ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
-            : null;
+  //   const from = (safePage - 1) * safeLimit;
+  //   const to = from + safeLimit - 1;
 
-    let q = supabase()
-        .from("jobs")
-        .select(
-            `
-            *,
-            quote:quotes (
-                uuid,
-                contact_first_name,
-                contact_last_name
-            ),
-            job_recurrences:job_recurrences (
-                *
-            )
-            `,
-            { count: "exact" }
-        )
-        .eq("is_deleted", false)
-        .order("created_at", { ascending: false });
+  //   const olderThanIso =
+  //       safeOlder !== null && safeOlder > 0
+  //           ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
+  //           : null;
 
-    if (status && typeof status === "string" && status.trim()) {
-        q = q.eq("status", status.trim());
-    }
+  //   let q = supabase()
+  //       .from("jobs")
+  //       .select(
+  //           `
+  //           *,
+  //           quote:quotes (
+  //               uuid,
+  //               contact_first_name,
+  //               contact_last_name
+  //           ),
+  //           job_recurrences:job_recurrences (
+  //               *
+  //           )
+  //           `,
+  //           { count: "exact" }
+  //       )
+  //       .eq("is_deleted", false)
+  //       .order("created_at", { ascending: false });
 
-    if (olderThanIso) {
-        q = q.lte("created_at", olderThanIso);
-    }
+  //   if (status && typeof status === "string" && status.trim()) {
+  //       q = q.eq("status", status.trim());
+  //   }
 
-    const { data, error, count } = await q.range(from, to);
-    if (error) throw new Error(error.message);
+  //   if (olderThanIso) {
+  //       q = q.lte("created_at", olderThanIso);
+  //   }
 
-    const jobs = (data || []).map((job) => ({
-        ...job,
-        job_recurrences: (job.job_recurrences || []).filter(
-            (r) => r.is_deleted === false
-        ),
-    }));
+  //   const { data, error, count } = await q.range(from, to);
+  //   if (error) throw new Error(error.message);
 
-    const totalCount = count || 0;
-    const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+  //   const jobs = (data || []).map((job) => ({
+  //       ...job,
+  //       job_recurrences: (job.job_recurrences || []).filter(
+  //           (r) => r.is_deleted === false
+  //       ),
+  //   }));
 
-    return {
-        jobs,
-        page: safePage,
-        totalPages,
-        totalCount,
-        limit: safeLimit,
-    };
-}
+  //   const totalCount = count || 0;
+  //   const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+
+  //   return {
+  //       jobs,
+  //       page: safePage,
+  //       totalPages,
+  //       totalCount,
+  //       limit: safeLimit,
+  //   };
+  // }
+
+  
     // static async list({ status, limit = 5, page = 1, olderThanDays = 30 }) {
     //     const safeLimit = clampInt(limit, 5, 1, 50);
     //     const safePage = clampInt(page, 1, 1, 999999);
@@ -729,6 +971,261 @@ export default class Job {
     // }
 
     // Backfill jobs.job_address from quotes.address for jobs where job_address is null
+    
+  static async list({
+      status,
+      search,
+      scheduledPreset,
+      scheduledStart,
+      scheduledEnd,
+      limit = 50,
+      page = 1,
+      olderThanDays = null,
+    }) {
+      const safeLimit = clampInt(limit, 50, 1, 200);
+      const safePage = clampInt(page, 1, 1, 999999);
+
+      const hasOlderThanFilter =
+        olderThanDays !== null &&
+        olderThanDays !== undefined &&
+        olderThanDays !== "" &&
+        !Number.isNaN(Number(olderThanDays));
+
+      const safeOlder = hasOlderThanFilter
+        ? clampInt(olderThanDays, 30, 0, 3650)
+        : null;
+
+      const from = (safePage - 1) * safeLimit;
+      const to = from + safeLimit - 1;
+
+      const olderThanIso =
+        safeOlder !== null && safeOlder > 0
+          ? new Date(Date.now() - safeOlder * 24 * 60 * 60 * 1000).toISOString()
+          : null;
+
+      const normalizedStatus =
+        typeof status === "string" && status.trim()
+          ? status.trim().toLowerCase()
+          : null;
+
+      const normalizedSearch =
+        typeof search === "string" && search.trim()
+          ? search.trim().toLowerCase()
+          : null;
+
+      const normalizedPreset =
+        typeof scheduledPreset === "string" && scheduledPreset.trim()
+          ? scheduledPreset.trim().toLowerCase()
+          : null;
+
+      const normalizedScheduledStart =
+        typeof scheduledStart === "string" && scheduledStart.trim()
+          ? scheduledStart.trim()
+          : null;
+
+      const normalizedScheduledEnd =
+        typeof scheduledEnd === "string" && scheduledEnd.trim()
+          ? scheduledEnd.trim()
+          : null;
+
+      const allowedPresets = ["today", "day_prior", "seven_days_prior"];
+      if (normalizedPreset && !allowedPresets.includes(normalizedPreset)) {
+        throw new Error(
+          "scheduledPreset must be one of: today, day_prior, seven_days_prior"
+        );
+      }
+
+      let q = supabase()
+        .from("jobs")
+        .select(
+          `
+          *,
+          quote:quotes (
+            uuid,
+            contact_first_name,
+            contact_last_name,
+            contact_email,
+            contact_mobile,
+            contact_landline,
+            address
+          ),
+          customer:customers (
+            uuid,
+            first_name,
+            last_name,
+            email,
+            mobile_phone,
+            landline_phone,
+            address
+          ),
+          job_recurrences:job_recurrences (
+            *
+          )
+          `,
+          { count: "exact" }
+        )
+        .eq("is_deleted", false)
+        .order("scheduled_at", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: false });
+
+      if (normalizedStatus) {
+        q = q.eq("status", normalizedStatus);
+      }
+
+      if (olderThanIso) {
+        q = q.lte("created_at", olderThanIso);
+      }
+
+      if (normalizedScheduledStart) {
+        q = q.gte("scheduled_at", `${normalizedScheduledStart}T00:00:00.000Z`);
+      }
+
+      if (normalizedScheduledEnd) {
+        q = q.lte("scheduled_at", `${normalizedScheduledEnd}T23:59:59.999Z`);
+      }
+
+      if (normalizedPreset === "today") {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+
+        q = q.gte("scheduled_at", start.toISOString()).lte("scheduled_at", end.toISOString());
+      }
+
+      if (normalizedPreset === "day_prior") {
+        const start = new Date();
+        start.setDate(start.getDate() + 1);
+        start.setHours(0, 0, 0, 0);
+
+        const end = new Date();
+        end.setDate(end.getDate() + 1);
+        end.setHours(23, 59, 59, 999);
+
+        q = q.gte("scheduled_at", start.toISOString()).lte("scheduled_at", end.toISOString());
+      }
+
+      if (normalizedPreset === "seven_days_prior") {
+        const start = new Date();
+        start.setDate(start.getDate() + 7);
+        start.setHours(0, 0, 0, 0);
+
+        const end = new Date();
+        end.setDate(end.getDate() + 7);
+        end.setHours(23, 59, 59, 999);
+
+        q = q.gte("scheduled_at", start.toISOString()).lte("scheduled_at", end.toISOString());
+      }
+
+      const { data, error, count } = await q.range(from, to);
+
+      if (error) {
+        throw new Error(`Error fetching jobs: ${error.message}`);
+      }
+
+      let jobs = (data || []).map((job) => {
+        const safeRecurrences = (job.job_recurrences || []).filter(
+          (r) => r.is_deleted === false
+        );
+
+        const customerFirstName =
+          job?.quote?.contact_first_name ??
+          job?.customer?.first_name ??
+          null;
+
+        const customerLastName =
+          job?.quote?.contact_last_name ??
+          job?.customer?.last_name ??
+          null;
+
+        const customerName = [customerFirstName, customerLastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+        let scheduleLabel = "Not scheduled";
+
+        if (job.scheduled_at) {
+          const date = new Date(job.scheduled_at);
+          if (!Number.isNaN(date.getTime())) {
+            scheduleLabel = new Intl.DateTimeFormat("en-NZ", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(date);
+          }
+        }
+
+        return {
+          ...job,
+          address: job.job_address ?? job.address ?? null,
+          schedule_label: scheduleLabel,
+          customer_name: customerName || null,
+          job_recurrences: safeRecurrences,
+        };
+      });
+
+      if (normalizedSearch) {
+        jobs = jobs.filter((job) => {
+          const fullName =
+            [job?.quote?.contact_first_name, job?.quote?.contact_last_name]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            [job?.customer?.first_name, job?.customer?.last_name]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+
+          const serviceLabels = Array.isArray(job.services)
+            ? job.services.map((service) => service?.label || service?.value || "").join(" ")
+            : "";
+
+          const fields = [
+            job.uuid,
+            job.status,
+            job.job_address,
+            job.address,
+            job.schedule_label,
+            fullName,
+            job?.quote?.uuid,
+            job?.quote?.contact_email,
+            job?.quote?.contact_mobile,
+            job?.quote?.contact_landline,
+            job?.customer?.email,
+            job?.customer?.mobile_phone,
+            job?.customer?.landline_phone,
+            serviceLabels,
+          ]
+            .filter(Boolean)
+            .map((value) => String(value).toLowerCase());
+
+          return fields.some((value) => value.includes(normalizedSearch));
+        });
+      }
+
+      const totalCount = normalizedSearch ? jobs.length : count || 0;
+      const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+
+      const pagedJobs = normalizedSearch ? jobs.slice(from, to + 1) : jobs;
+
+      return {
+        jobs: pagedJobs,
+        page: safePage,
+        totalPages,
+        total: totalCount,
+        totalCount,
+        limit: safeLimit,
+        filters: {
+          status: normalizedStatus,
+          search: normalizedSearch,
+          scheduledPreset: normalizedPreset,
+          scheduledStart: normalizedScheduledStart,
+          scheduledEnd: normalizedScheduledEnd,
+          olderThanDays: safeOlder,
+        },
+      };
+    }
     static async backfillJobAddressesFromQuotes() {
         // 1) get jobs missing job_address, include quote address
         const { data: jobs, error: fetchErr } = await supabase()

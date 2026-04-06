@@ -56,6 +56,7 @@ app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 
 // Routes
 app.use("/api", emailRouter);
+//contact router
 app.use("/api", customerContactRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/services", serviceRouter);

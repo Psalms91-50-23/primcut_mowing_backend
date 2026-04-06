@@ -1,5 +1,5 @@
 import TermsAndConditions from "../models/TermsAndConditions.js";
-import { generatePrefixedId, normalizeVersion } from "../util/util.js";
+import { generatePrefixedId, normalizeVersion, formatTermsForPDF } from "../util/util.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { generateTermsPDF } from "../util/generateTermsPDF.js";
 import { uploadTermsPDFBuffer, downloadTermsPDFBuffer, deleteTermsPDF  } from "../util/termsAndConditionsHelper.js";
@@ -274,10 +274,7 @@ export const createTermsAndConditions = async (req, res) => {
       return res.status(400).json({ error: "Content is required" });
     }
 
-    console.log("1. validation passed");
-
     const existingVersion = await TermsAndConditions.findByVersion(version);
-    console.log("2. existingVersion:", existingVersion);
 
     if (existingVersion) {
       return res.status(409).json({
@@ -287,32 +284,29 @@ export const createTermsAndConditions = async (req, res) => {
 
     if (is_active) {
       const activeTerms = await TermsAndConditions.findActive();
-      console.log("3. activeTerms:", activeTerms);
 
       if (activeTerms) {
         await TermsAndConditions.updateByUUID(activeTerms.uuid, {
           is_active: false,
         });
-        console.log("4. old active terms deactivated");
+
       }
     }
 
     const uuid = await generateUniqueTermsUUID();
-    console.log("5. generated uuid:", uuid);
+  
+    const pdfReadyContent = formatTermsForPDF(content);
+    const pdfBuffer = await generateTermsPDF(pdfReadyContent, version);
 
-    const pdfBuffer = await generateTermsPDF(content, version);
-    console.log("6. pdf generated, size:", pdfBuffer?.length);
 
     const safeVersion = String(version).replace(/[^a-zA-Z0-9._-]/g, "-");
     const filePath = `terms/${uuid}-v${safeVersion}.pdf`;
-    console.log("7. filePath:", filePath);
 
     const uploadResult = await uploadTermsPDFBuffer({
       buffer: pdfBuffer,
       filePath,
       contentType: "application/pdf",
     });
-    console.log("8. uploadResult:", uploadResult);
 
     uploadedStoragePath = uploadResult.storagePath;
 
@@ -327,7 +321,6 @@ export const createTermsAndConditions = async (req, res) => {
       pdf_storage_path: uploadResult.storagePath,
       is_active: Boolean(is_active),
     });
-    console.log("9. created record:", created);
 
     await createChangeLogSafe({
       table_name: "terms_and_conditions",
@@ -345,7 +338,6 @@ export const createTermsAndConditions = async (req, res) => {
       },
       source: "dashboard",
     });
-    console.log("10. changelog created");
 
     if (is_active) {
       await createChangeLogSafe({
@@ -362,7 +354,6 @@ export const createTermsAndConditions = async (req, res) => {
         },
         source: "dashboard",
       });
-      console.log("11. activate changelog created");
     }
 
     return res.status(201).json(created);

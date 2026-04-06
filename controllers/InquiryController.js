@@ -1,95 +1,19 @@
 import Inquiry from "../models/Inquiry.js";
 import Customer from "../models/Customer.js";
 import { generatePrefixedId } from "../util/util.js";
-import { normalizedEmail, normalizeNZPhone, formatFullName, formatNZDate } from "../util/util.js";
+import {
+  normalizedEmail,
+  normalizeNZPhone,
+  formatFullName,
+  formatNZDate,
+  generateUniqueChangeLogUUID,
+} from "../util/util.js";
 import {
   sendInquiryToBusiness,
-  sendInquiryToClient
+  sendInquiryToClient,
 } from "../lib/email/index.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import InquiryReply from "../models/InquiryReply.js";
-
-// export const createInquiryReply = async (req, res) => {
-//   try {
-//     const { uuid } = req.params;
-//     const { reply_message, recipient_email, services } = req.body;
-
-//     if (!uuid) {
-//       return res.status(400).json({ error: "Inquiry uuid is required" });
-//     }
-
-//     if (!reply_message || !reply_message.trim()) {
-//       return res.status(400).json({ error: "Reply message is required" });
-//     }
-
-//     const existingInquiry = await Inquiry.findByUUID(uuid);
-
-//     if (!existingInquiry) {
-//       return res.status(404).json({ error: "Inquiry not found" });
-//     }
-
-//     const finalRecipientEmail =
-//       recipient_email?.trim()?.toLowerCase() || existingInquiry.email;
-
-//     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-//     if (!finalRecipientEmail || !emailRegex.test(finalRecipientEmail)) {
-//       return res.status(400).json({ error: "Valid recipient email is required" });
-//     }
-
-//     const finalSubject = `Re: [${existingInquiry.uuid}] ${formatFullName(existingInquiry.first_name, existingInquiry.last_name, false)}`;
-
-//     let replyUuid;
-//     let exists;
-
-//     do {
-//       replyUuid = generatePrefixedId("RIQ", 6);
-//       exists = await InquiryReply.findByUUID(replyUuid);
-//     } while (exists);
-
-//     const emailResult = await sendInquiryToClient({
-//       to: finalRecipientEmail,
-//       subject: finalSubject,
-//       data: {  
-//         inquiryUuid: existingInquiry.uuid,
-//         firstName: existingInquiry.first_name,
-//         lastName: existingInquiry.last_name,
-//         email: finalRecipientEmail,
-//         phone: existingInquiry.phone ?? null,
-//         services: finalSubject,
-//         message: reply_message.trim(),
-//       }
-//     });
-
-//     const createdReply = await InquiryReply.create({
-//       uuid: replyUuid,
-//       inquiry_uuid: existingInquiry.uuid,
-//       sender_user_uuid: req.user?.uuid || null,
-//       recipient_email: finalRecipientEmail,
-//       subject: finalSubject,
-//       message: reply_message.trim(),
-//       sent_at: new Date().toISOString(),
-//     });
-
-//     await Inquiry.updateByUUID(existingInquiry.uuid, {
-//       status: "contacted",
-//     });
-
-//     const updatedInquiry = await Inquiry.findByUUID(existingInquiry.uuid);
-
-//     return res.status(201).json({
-//       message: "Inquiry reply created, email sent, and inquiry updated successfully",
-//       data: updatedInquiry,
-//       inquiryReply: createdReply,
-//       email: emailResult || null,
-//     });
-//   } catch (error) {
-//     console.error("createInquiryReply error:", error);
-//     return res.status(500).json({
-//       error: "Failed to create inquiry reply",
-//       details: error?.message || "Unknown error",
-//     });
-//   }
-// };
 
 export const createInquiryReply = async (req, res) => {
   const rollbackSteps = [];
@@ -138,18 +62,6 @@ export const createInquiryReply = async (req, res) => {
       replyExists = await InquiryReply.findByUUID(replyUuid);
     } while (replyExists);
 
-    const generateChangeLogUUID = async () => {
-      let changeLogUuid;
-      let changeLogExists;
-
-      do {
-        changeLogUuid = generatePrefixedId("CL", 7);
-        changeLogExists = await ChangeLog.findByUUID(changeLogUuid);
-      } while (changeLogExists);
-
-      return changeLogUuid;
-    };
-
     const createdReply = await InquiryReply.create({
       uuid: replyUuid,
       inquiry_uuid: existingInquiry.uuid,
@@ -176,42 +88,25 @@ export const createInquiryReply = async (req, res) => {
     });
 
     const replyCreateLog = await createChangeLogSafe({
-      uuid: await generateChangeLogUUID(),
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "inquiry_replies",
       record_uuid: createdReply.uuid,
       user_uuid: actorUserUuid,
       action: "create",
       summary: `Reply created for inquiry ${existingInquiry.uuid}`,
-      changed_fields: [
-        "uuid",
-        "inquiry_uuid",
-        "sender_user_uuid",
-        "recipient_email",
-        "subject",
-        "message",
-        "sent_at",
-      ],
+      changed_fields: {
+        uuid: { old: null, new: createdReply.uuid },
+        inquiry_uuid: { old: null, new: createdReply.inquiry_uuid },
+        sender_user_uuid: { old: null, new: createdReply.sender_user_uuid },
+        recipient_email: { old: null, new: createdReply.recipient_email },
+        subject: { old: null, new: createdReply.subject },
+        message: { old: null, new: createdReply.message },
+        sent_at: { old: null, new: createdReply.sent_at },
+      },
       oldData: null,
       newData: createdReply,
       source: "dashboard",
     });
-
-    if (replyCreateLog?.uuid && ChangeLog?.deleteByUUID) {
-      rollbackSteps.push({
-        name: "delete_reply_create_log",
-        run: async () => {
-          try {
-            await ChangeLog.deleteByUUID(replyCreateLog.uuid);
-            console.log(`Rollback success: deleted change log ${replyCreateLog.uuid}`);
-          } catch (rollbackError) {
-            console.error(
-              `Rollback failed: could not delete change log ${replyCreateLog.uuid}`,
-              rollbackError
-            );
-          }
-        },
-      });
-    }
 
     const updatedInquiry = await Inquiry.updateByUUID(existingInquiry.uuid, {
       status: "contacted",
@@ -237,34 +132,22 @@ export const createInquiryReply = async (req, res) => {
     });
 
     const inquiryStatusLog = await createChangeLogSafe({
-      uuid: await generateChangeLogUUID(),
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "inquiries",
       record_uuid: existingInquiry.uuid,
       user_uuid: actorUserUuid,
       action: "status_change",
       summary: `Status changed from ${previousInquiryStatus || "null"} to contacted`,
-      changed_fields: ["status"],
+      changed_fields: {
+        status: {
+          old: previousInquiryStatus || null,
+          new: "contacted",
+        },
+      },
       oldData: { status: previousInquiryStatus || null },
       newData: { status: "contacted" },
       source: "dashboard",
     });
-
-    if (inquiryStatusLog?.uuid && ChangeLog?.deleteByUUID) {
-      rollbackSteps.push({
-        name: "delete_inquiry_status_log",
-        run: async () => {
-          try {
-            await ChangeLog.deleteByUUID(inquiryStatusLog.uuid);
-            console.log(`Rollback success: deleted change log ${inquiryStatusLog.uuid}`);
-          } catch (rollbackError) {
-            console.error(
-              `Rollback failed: could not delete change log ${inquiryStatusLog.uuid}`,
-              rollbackError
-            );
-          }
-        },
-      });
-    }
 
     const emailResult = await sendInquiryToClient({
       to: finalRecipientEmail,
@@ -282,13 +165,26 @@ export const createInquiryReply = async (req, res) => {
     });
 
     await createChangeLogSafe({
-      uuid: await generateChangeLogUUID(),
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "inquiries",
       record_uuid: existingInquiry.uuid,
       user_uuid: actorUserUuid,
       action: "system_event",
       summary: `Reply email sent to ${finalRecipientEmail}`,
-      changed_fields: ["recipient_email", "subject", "inquiry_reply_uuid"],
+      changed_fields: {
+        recipient_email: {
+          old: null,
+          new: finalRecipientEmail,
+        },
+        subject: {
+          old: null,
+          new: finalSubject,
+        },
+        inquiry_reply_uuid: {
+          old: null,
+          new: createdReply.uuid,
+        },
+      },
       oldData: null,
       newData: {
         recipient_email: finalRecipientEmail,
@@ -318,114 +214,12 @@ export const createInquiryReply = async (req, res) => {
   }
 };
 
-// export const createInquiry = async (req, res) => {
-//   try {
-//     const { firstName, lastName, email, phone, message, services } = req.body;
-//     console.log({services})
-//     console.log(req.body)
-//     if (!firstName?.trim()) {
-//       return res.status(400).json({ error: "First name is required" });
-//     }
-
-//     if (!lastName?.trim()) {
-//       return res.status(400).json({ error: "Last name is required" });
-//     }
-
-//     const emailToValidate = normalizedEmail(email);
-
-//     if (!emailToValidate) {
-//       return res.status(400).json({ error: "Valid email is required" });
-//     }
-
-//     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-//     if (!emailRegex.test(emailToValidate)) {
-//       return res.status(400).json({ error: "Valid email is required" });
-//     }
-
-//     if (!message?.trim()) {
-//       return res.status(400).json({ error: "Message is required" });
-//     }
-
-//     // ✅ CLEAN SERVICES ARRAY
-//     const cleanedServices = Array.isArray(services)
-//       ? services
-//           .filter((s) => typeof s === "string" && s.trim())
-//           .map((s) => s.trim())
-//       : [];
-//     const normalizedPhone = normalizeNZPhone(phone?.trim() || "");
-//     const details = {
-//       first_name: firstName.trim(),
-//       last_name: lastName.trim(),
-//       email: emailToValidate,
-//       phone: normalizedPhone || null,
-//       message: message.trim(),
-//       services: cleanedServices.length ? cleanedServices : null, // ✅ JSONB
-//     };
-  
-
-//     let uuid;
-//     let exists;
-
-//     do {
-//       uuid = generatePrefixedId("INQ", 6);
-//       exists = await Inquiry.findByUUID(uuid);
-//     } while (exists);
-
-//     let customer_uuid = null;
-
-//     if (req.user?.customer_uuid) {
-//       customer_uuid = req.user.customer_uuid;
-//     } else {
-//       const existingCustomer = await Customer.findByEmail(emailToValidate);
-//       if (existingCustomer) {
-//         customer_uuid = existingCustomer.uuid;
-//       }
-//     }
-
-//     const inquiry = await Inquiry.create({
-//       uuid,
-//       customer_uuid,
-//       ...details,
-//       status: "new",
-//     });
-
-//     const inquiryLink = `${process.env.CLIENT_URL}/employee/inquiry/${inquiry.uuid}`;
-
-//     await sendInquiryToBusiness({
-//       to:  process.env.SEND_TO_INQUIRY || "inquiries@happyproperty.co.nz",
-//       subject: `[${inquiry.uuid}] ${formatFullName(inquiry.first_name, inquiry.last_name, false)} — New Inquiry`,
-//       data: {
-//       inquiryUuid: inquiry.uuid,
-//       firstName: inquiry.first_name,
-//       lastName: inquiry.last_name,
-//       email: inquiry.email,
-//       phone: inquiry.phone ?? null,
-//       message: inquiry.message,
-//       services: cleanedServices, // ✅ now array
-//       inquiryLink,
-//       created_at: formatNZDate(inquiry.created_at),
-//       }
-//     });
-
-//     return res.status(201).json({
-//       message: "Inquiry created successfully",
-//       data: inquiry,
-//     });
-//   } catch (error) {
-//     console.error("createInquiry error:", error);
-//     return res.status(500).json({
-//       error: "Failed to create inquiry",
-//       details: error?.message || "Unknown error",
-//     });
-//   }
-// };
-
 export const createInquiry = async (req, res) => {
   const rollbackSteps = [];
 
   try {
     const { firstName, lastName, email, phone, message, services } = req.body;
+    const actorUserUuid = req.user?.uuid || null;
 
     console.log({ services });
     console.log(req.body);
@@ -512,6 +306,29 @@ export const createInquiry = async (req, res) => {
       },
     });
 
+    await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
+      table_name: "inquiries",
+      record_uuid: inquiry.uuid,
+      user_uuid: actorUserUuid,
+      action: "create",
+      summary: "Inquiry created",
+      changed_fields: {
+        uuid: { old: null, new: inquiry.uuid },
+        customer_uuid: { old: null, new: inquiry.customer_uuid ?? null },
+        first_name: { old: null, new: inquiry.first_name },
+        last_name: { old: null, new: inquiry.last_name },
+        email: { old: null, new: inquiry.email },
+        phone: { old: null, new: inquiry.phone ?? null },
+        message: { old: null, new: inquiry.message },
+        services: { old: null, new: inquiry.services ?? null },
+        status: { old: null, new: inquiry.status },
+      },
+      oldData: null,
+      newData: inquiry,
+      source: req.user ? "dashboard" : "public_form",
+    });
+
     const inquiryLink = `${process.env.CLIENT_URL}/employee/inquiry/${inquiry.uuid}`;
 
     await sendInquiryToBusiness({
@@ -532,6 +349,31 @@ export const createInquiry = async (req, res) => {
         inquiryLink,
         created_at: formatNZDate(inquiry.created_at),
       },
+    });
+
+    await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
+      table_name: "inquiries",
+      record_uuid: inquiry.uuid,
+      user_uuid: actorUserUuid,
+      action: "system_event",
+      summary: "Inquiry email sent to business",
+      changed_fields: {
+        sent_to: {
+          old: null,
+          new: process.env.SEND_TO_INQUIRY || "inquiries@happyproperty.co.nz",
+        },
+        inquiry_link: {
+          old: null,
+          new: inquiryLink,
+        },
+      },
+      oldData: null,
+      newData: {
+        sent_to: process.env.SEND_TO_INQUIRY || "inquiries@happyproperty.co.nz",
+        inquiry_link: inquiryLink,
+      },
+      source: req.user ? "dashboard" : "public_form",
     });
 
     return res.status(201).json({
@@ -569,122 +411,12 @@ export const getAllInquiries = async (req, res) => {
   }
 };
 
-
-// export const updateInquiryByUUID = async (req, res) => {
-//   try {
-//     console.log("1")
-//     const { uuid } = req.params;
-//     const {
-//       first_name,
-//       last_name,
-//       email,
-//       phone,
-//       message,
-//       status,
-//       reply_message,
-//       reply_subject,
-//       recipient_email,
-//     } = req.body;
-
-//     if (!uuid) {
-//       return res.status(400).json({ error: "Inquiry uuid is required" });
-//     }
-//     console.log("2")
-//     const existingInquiry = await Inquiry.findByUUID(uuid);
-
-//     if (!existingInquiry) {
-//       return res.status(404).json({ error: "Inquiry not found" });
-//     }
-//     console.log("3")
-//     const updates = {};
-
-//     if (first_name !== undefined) updates.first_name = first_name?.trim();
-//     if (last_name !== undefined) updates.last_name = last_name?.trim() || null;
-//     if (email !== undefined) updates.email = email?.trim().toLowerCase();
-//     if (phone !== undefined) updates.phone = phone?.trim() || null;
-//     if (message !== undefined) updates.message = message?.trim();
-//     if (status !== undefined) updates.status = status;
-
-//     if (updates.email) {
-//       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-//       if (!emailRegex.test(updates.email)) {
-//         return res.status(400).json({ error: "Valid email is required" });
-//       }
-//     }
-
-//     const updatedInquiry = await Inquiry.updateByUUID(uuid, updates);
-//     console.log("4")
-//     let createdReply = null;
-//     let emailResult = null;
-
-//     if (reply_message !== undefined && reply_message?.trim()) {
-//       const finalRecipientEmail =
-//         recipient_email?.trim()?.toLowerCase() ||
-//         updates.email ||
-//         existingInquiry.email;
-
-//       const finalSubject =
-//         reply_subject?.trim() || `Re: Inquiry ${existingInquiry.uuid} - ${formatFullName(existingInquiry.first_name, existingInquiry.last_name, false)}`;
-
-//       const finalPhone =
-//         updatedInquiry.phone ?? existingInquiry.phone ?? null;
-
-//       let replyUuid;
-//       let exists;
-
-//       do {
-//         replyUuid = generatePrefixedId("RIQ", 6);
-//         exists = await InquiryReply.findByUUID(replyUuid);
-//       } while (exists);
-//       console.log("5")
-//       emailResult = await sendInquiryToClient({
-//         inquiryUuid: existingInquiry.uuid,
-//         firstName: updatedInquiry.first_name || existingInquiry.first_name,
-//         lastName: updatedInquiry.last_name || existingInquiry.last_name,
-//         email: finalRecipientEmail,
-//         phone: finalPhone,
-//         subject: finalSubject,
-//         message: reply_message.trim(),
-//       });
-// console.log("6")
-//       createdReply = await InquiryReply.create({
-//         uuid: replyUuid,
-//         inquiry_uuid: existingInquiry.uuid,
-//         sender_user_uuid: req.user?.uuid || null,
-//         recipient_email: finalRecipientEmail,
-//         subject: finalSubject,
-//         message: reply_message.trim(),
-//         sent_at: new Date().toISOString(),
-//       });
-// console.log("7")
-//       if (status === undefined && updatedInquiry.status !== "contacted") {
-//         await Inquiry.updateByUUID(existingInquiry.uuid, {
-//           status: "contacted",
-//         });
-//         updatedInquiry.status = "contacted";
-//       }
-//     }
-
-//     return res.status(200).json({
-//       message: createdReply
-//         ? "Inquiry updated, reply created, and email sent successfully"
-//         : "Inquiry updated successfully",
-//       data: updatedInquiry,
-//       inquiryReply: createdReply,
-//       email: emailResult || null,
-//     });
-//   } catch (error) {
-//     console.error("updateInquiryByUUID error:", error);
-//     return res.status(500).json({
-//       error: "Failed to update inquiry",
-//       details: error?.message || "Unknown error",
-//     });
-//   }
-// };
 export const updateInquiryByUUID = async (req, res) => {
   try {
     console.log("updateInquiryByUUID: 1 start");
     const { uuid } = req.params;
+    const actorUserUuid = req.user?.uuid || null;
+
     const {
       first_name,
       last_name,
@@ -729,7 +461,9 @@ export const updateInquiryByUUID = async (req, res) => {
     if (first_name !== undefined) updates.first_name = first_name?.trim();
     if (last_name !== undefined) updates.last_name = last_name?.trim() || null;
     if (email !== undefined) updates.email = email?.trim().toLowerCase();
-    if (phone !== undefined) updates.phone = phone?.trim() || null;
+    if (phone !== undefined) {
+      updates.phone = phone?.trim() ? normalizeNZPhone(phone.trim()) : null;
+    }
     if (message !== undefined) updates.message = message?.trim();
     if (status !== undefined) updates.status = status;
 
@@ -755,6 +489,34 @@ export const updateInquiryByUUID = async (req, res) => {
     if (!updatedInquiry) {
       console.log("updateInquiryByUUID: 7.1 update returned null");
       return res.status(404).json({ error: "Inquiry not found while updating" });
+    }
+
+    const changedFields = {};
+    for (const key of Object.keys(updates || {})) {
+      if (
+        JSON.stringify(existingInquiry?.[key] ?? null) !==
+        JSON.stringify(updatedInquiry?.[key] ?? null)
+      ) {
+        changedFields[key] = {
+          old: existingInquiry?.[key] ?? null,
+          new: updatedInquiry?.[key] ?? null,
+        };
+      }
+    }
+
+    if (Object.keys(changedFields).length > 0) {
+      await createChangeLogSafe({
+        uuid: await generateUniqueChangeLogUUID(),
+        table_name: "inquiries",
+        record_uuid: uuid,
+        user_uuid: actorUserUuid,
+        action: "update",
+        summary: "Inquiry updated",
+        changed_fields: changedFields,
+        oldData: existingInquiry,
+        newData: updatedInquiry,
+        source: "dashboard",
+      });
     }
 
     let createdReply = null;
@@ -835,6 +597,57 @@ export const updateInquiryByUUID = async (req, res) => {
         createdReplyUuid: createdReply?.uuid || null,
       });
 
+      await createChangeLogSafe({
+        uuid: await generateUniqueChangeLogUUID(),
+        table_name: "inquiry_replies",
+        record_uuid: createdReply.uuid,
+        user_uuid: actorUserUuid,
+        action: "create",
+        summary: `Reply created for inquiry ${existingInquiry.uuid}`,
+        changed_fields: {
+          uuid: { old: null, new: createdReply.uuid },
+          inquiry_uuid: { old: null, new: createdReply.inquiry_uuid },
+          sender_user_uuid: { old: null, new: createdReply.sender_user_uuid },
+          recipient_email: { old: null, new: createdReply.recipient_email },
+          subject: { old: null, new: createdReply.subject },
+          message: { old: null, new: createdReply.message },
+          sent_at: { old: null, new: createdReply.sent_at },
+        },
+        oldData: null,
+        newData: createdReply,
+        source: "dashboard",
+      });
+
+      await createChangeLogSafe({
+        uuid: await generateUniqueChangeLogUUID(),
+        table_name: "inquiries",
+        record_uuid: existingInquiry.uuid,
+        user_uuid: actorUserUuid,
+        action: "system_event",
+        summary: `Reply email sent to ${finalRecipientEmail}`,
+        changed_fields: {
+          recipient_email: {
+            old: null,
+            new: finalRecipientEmail,
+          },
+          subject: {
+            old: null,
+            new: finalSubject,
+          },
+          inquiry_reply_uuid: {
+            old: null,
+            new: createdReply.uuid,
+          },
+        },
+        oldData: null,
+        newData: {
+          recipient_email: finalRecipientEmail,
+          subject: finalSubject,
+          inquiry_reply_uuid: createdReply.uuid,
+        },
+        source: "dashboard",
+      });
+
       if (status === undefined && updatedInquiry.status !== "contacted") {
         console.log("updateInquiryByUUID: 17 before auto-status update to contacted");
         const contactedInquiry = await Inquiry.updateByUUID(existingInquiry.uuid, {
@@ -843,6 +656,24 @@ export const updateInquiryByUUID = async (req, res) => {
         console.log("updateInquiryByUUID: 18 after auto-status update", {
           contacted: !!contactedInquiry,
           status: contactedInquiry?.status || null,
+        });
+
+        await createChangeLogSafe({
+          uuid: await generateUniqueChangeLogUUID(),
+          table_name: "inquiries",
+          record_uuid: existingInquiry.uuid,
+          user_uuid: actorUserUuid,
+          action: "status_change",
+          summary: `Status changed from ${updatedInquiry.status || existingInquiry.status || "null"} to contacted`,
+          changed_fields: {
+            status: {
+              old: updatedInquiry.status || existingInquiry.status || null,
+              new: "contacted",
+            },
+          },
+          oldData: { status: updatedInquiry.status || existingInquiry.status || null },
+          newData: { status: "contacted" },
+          source: "dashboard",
         });
 
         updatedInquiry.status = "contacted";
@@ -881,6 +712,7 @@ export const updateInquiryByUUID = async (req, res) => {
 export const deleteInquiryByUUID = async (req, res) => {
   try {
     const { uuid } = req.params;
+    const actorUserUuid = req.user?.uuid || null;
 
     if (!uuid) {
       return res.status(400).json({ error: "Inquiry uuid is required" });
@@ -893,6 +725,24 @@ export const deleteInquiryByUUID = async (req, res) => {
     }
 
     await Inquiry.deleteByUUID(uuid);
+
+    await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
+      table_name: "inquiries",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "delete",
+      summary: "Inquiry deleted",
+      changed_fields: {
+        deleted_record: {
+          old: existingInquiry,
+          new: null,
+        },
+      },
+      oldData: existingInquiry,
+      newData: null,
+      source: "dashboard",
+    });
 
     return res.status(200).json({
       message: "Inquiry deleted successfully",
@@ -967,11 +817,7 @@ export const getMyInquiryByUUID = async (req, res) => {
 
 export const getInquiries = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      status = null,
-    } = req.query;
+    const { page = 1, limit = 10, status = null } = req.query;
 
     const result = await Inquiry.getPaginated({
       page: Number(page),
@@ -991,7 +837,8 @@ export const getInquiries = async (req, res) => {
 export const getInquiryByUUID = async (req, res) => {
   try {
     const { uuid } = req.params;
-    console.log({uuid}, "get inquiry by uuid")
+    console.log({ uuid }, "get inquiry by uuid");
+
     if (!uuid) {
       return res.status(400).json({ error: "Inquiry UUID is required" });
     }
@@ -1010,31 +857,3 @@ export const getInquiryByUUID = async (req, res) => {
     });
   }
 };
-
-
-// export const getInquiryByUUID = async (req, res) => {
-//   try {
-//     const { uuid } = req.params;
-
-//     if (!uuid) {
-//       return res.status(400).json({ error: "Inquiry uuid is required" });
-//     }
-
-//     const inquiry = await Inquiry.findByUUID(uuid);
-
-//     if (!inquiry) {
-//       return res.status(404).json({ error: "Inquiry not found" });
-//     }
-
-//     return res.status(200).json({
-//       message: "Inquiry fetched successfully",
-//       data: inquiry,
-//     });
-//   } catch (error) {
-//     console.error("getInquiryByUUID error:", error);
-//     return res.status(500).json({
-//       error: "Failed to fetch inquiry",
-//       details: error?.message || "Unknown error",
-//     });
-//   }
-// };

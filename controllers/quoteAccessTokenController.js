@@ -3,7 +3,12 @@ import Quote from "../models/Quote.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import { createChangeLogSafe } from "../util/createChangeLogSafe.js";
 import { sendQuoteToClient } from "../lib/email/index.js";
-import { formatExpiry, formatFullName, generatePrefixedId } from "../util/util.js";
+import {
+  formatExpiry,
+  formatFullName,
+  generatePrefixedId,
+  generateUniqueChangeLogUUID,
+} from "../util/util.js";
 import { supabase } from "../config/db.js";
 
 const TOKEN_EXPIRY_DAYS = 3;
@@ -134,6 +139,7 @@ export const create = async (req, res) => {
     });
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "quote_access_tokens",
       record_uuid: createdToken?.uuid || tokenUuid,
       user_uuid: actorUserUuid,
@@ -152,6 +158,12 @@ export const create = async (req, res) => {
           old: null,
           new: expires_at.toISOString(),
         },
+      },
+      oldData: null,
+      newData: createdToken || {
+        uuid: tokenUuid,
+        quote_uuid,
+        expires_at: expires_at.toISOString(),
       },
       source: "dashboard",
     });
@@ -178,12 +190,21 @@ export const revokeAll = async (req, res) => {
     await QuoteAccessToken.revokeAllByQuoteUUID(quote_uuid);
 
     await createChangeLogSafe({
+      uuid: await generateUniqueChangeLogUUID(),
       table_name: "quotes",
       record_uuid: quote_uuid,
       user_uuid: actorUserUuid,
       action: "update",
       summary: "All quote access tokens revoked.",
       changed_fields: {
+        access_tokens_revoked: {
+          old: false,
+          new: true,
+        },
+      },
+      oldData: null,
+      newData: {
+        quote_uuid,
         access_tokens_revoked: true,
       },
       source: "dashboard",
@@ -224,7 +245,9 @@ export const viewPublicQuote = async (req, res) => {
       return res.status(404).json({ error: "Quote not available" });
     }
 
-    const accessTokenViewCounter = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
+    const accessTokenViewCounter = await QuoteAccessToken.incrementViewCount(
+      tokenRecord.uuid
+    );
     if (!accessTokenViewCounter) {
       console.warn("Quote access updated failed for token:", tokenRecord.uuid);
     }
@@ -249,8 +272,8 @@ export const validateQuoteAccessToken = async (req, res) => {
     const tokenHash = hashToken(token);
     const now = new Date();
     const tokenRecord = await QuoteAccessToken.findOne(uuid, tokenHash);
-    if (!tokenRecord) {
 
+    if (!tokenRecord) {
       res.clearCookie("quote_session", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -258,7 +281,6 @@ export const validateQuoteAccessToken = async (req, res) => {
         path: "/",
       });
       return res.status(401).json({ message: "Invalid or expired quote link" });
-
     }
 
     if (tokenRecord.expires_at && new Date(tokenRecord.expires_at) < now) {
@@ -273,18 +295,18 @@ export const validateQuoteAccessToken = async (req, res) => {
 
     const quote = await Quote.findByUUID(uuid);
     if (!quote) {
-       res.clearCookie("quote_session", {
+      res.clearCookie("quote_session", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         path: "/",
       });
-        return res.status(401).json({ message: "Invalid or expired quote link" });
+      return res.status(401).json({ message: "Invalid or expired quote link" });
     }
 
     const quoteExpiry = new Date(quote.expiry_end);
-    
-     if (Number.isNaN(quoteExpiry.getTime()) || quoteExpiry < now) {
+
+    if (Number.isNaN(quoteExpiry.getTime()) || quoteExpiry < now) {
       res.clearCookie("quote_session", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -303,7 +325,9 @@ export const validateQuoteAccessToken = async (req, res) => {
       maxAge: maxAgeMs > 0 ? maxAgeMs : 0,
     });
 
-    const quoteAccessToken = await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
+    const quoteAccessToken = await QuoteAccessToken.incrementViewCount(
+      tokenRecord.uuid
+    );
     if (!quoteAccessToken) {
       console.warn("Quote access updated failed for token:", tokenRecord.uuid);
     }
@@ -387,7 +411,9 @@ export const validateQuoteSession = async (req, res) => {
         path: "/",
       });
 
-      return res.status(403).json({ message: "Session does not match requested quote" });
+      return res
+        .status(403)
+        .json({ message: "Session does not match requested quote" });
     }
 
     const quote = await Quote.findByUUID(uuid);

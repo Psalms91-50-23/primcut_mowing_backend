@@ -2,7 +2,7 @@ import Customer from "../models/Customer.js";
 import CustomerContact from "../models/CustomerContact.js";
 import Business from "../models/Business.js";
 import { createChangeLogSafe }  from "../util/createChangeLogSafe.js";
-import { normalizeNZPhone, generatePrefixedId } from "../util/util.js";
+import { normalizeNZPhone, generatePrefixedId, generateUniqueChangeLogUUID } from "../util/util.js";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_REGEX = /^[a-zA-Z0-9]{9}$/;
@@ -132,8 +132,11 @@ const createCustomer = async (req, res) => {
     if (!newCustomer) {
       return res.status(400).json({ error: "Customer could not be created" });
     }
+    
+    const changeLogUUID = await generateUniqueChangeLogUUID();
 
     await createChangeLogSafe({
+      uuid: changeLogUUID,
       table_name: "customers",
       record_uuid: newCustomer.uuid,
       user_uuid: actorUserUuid,
@@ -259,8 +262,9 @@ const hardDeleteCustomer = async (req, res) => {
     if (!deleted) {
       return res.status(404).json({ error: `Customer not deleted failed with UUID: ${uuid}` });
     }
-
+    const changeLogUUID = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUUID,
       table_name: "customers",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -302,8 +306,9 @@ const softDeleteCustomer = async (req, res) => {
     if (!softDeletedCustomer) {
       return res.status(404).json({ error: `Customer not found with UUID ${uuid}` });
     }
-
+    const changeLogUUID = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUUID,
       table_name: "customers",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -345,8 +350,9 @@ const reinstateCustomer = async (req, res) => {
     if (!reinstated) {
       return res.status(404).json({ error: `Customer not found with UUID ${uuid}` });
     }
-
+    const changeLogUUID = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUUID,
       table_name: "customers",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -442,9 +448,10 @@ const updateCustomerById = async (req, res) => {
         new: updated[key] ?? updates[key] ?? null,
       };
     }
-
+    const changeLogUUID = await generateUniqueChangeLogUUID();
     if (Object.keys(changedFields).length > 0) {
       await createChangeLogSafe({
+        uuid: changeLogUUID,
         table_name: "customers",
         record_uuid: updated.uuid,
         user_uuid: actorUserUuid,
@@ -534,9 +541,11 @@ const updateCustomerByUUID = async (req, res) => {
         new: updated[key] ?? updates[key] ?? null,
       };
     }
+    const changeLogUUID = await generateUniqueChangeLogUUID();
 
     if (Object.keys(changedFields).length > 0) {
       await createChangeLogSafe({
+        uuid: changeLogUUID,       
         table_name: "customers",
         record_uuid: uuid,
         user_uuid: actorUserUuid,
@@ -622,8 +631,9 @@ const linkCustomerToBusiness = async (req, res) => {
     const updatedCustomer = await Customer.findByUUIDAndUpdate(customer_uuid, {
       customer_type: "business",
     });
-
+    const businessChangeLogUUID = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: businessChangeLogUUID,
       table_name: "businesses",
       record_uuid: business_uuid,
       user_uuid: actorUserUuid,
@@ -637,8 +647,10 @@ const linkCustomerToBusiness = async (req, res) => {
       },
       source: "dashboard",
     });
-
+    
+    const customerChangeLogUUID = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: customerChangeLogUUID,
       table_name: "customers",
       record_uuid: customer_uuid,
       user_uuid: actorUserUuid,

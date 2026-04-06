@@ -1,6 +1,8 @@
 import Quote from "../models/Quote.js";
 import Customer from "../models/Customer.js";
 import Service from "../models/Service.js";
+import ChangeLog from "../models/ChangeLog.js";
+import PrivacyPolicy from "../models/PrivacyPolicy.js";
 import QuoteAccessToken from "../models/QuoteAccessToken.js";
 import Job from "../models/Job.js";
 import User from "../models/User.js";
@@ -14,6 +16,9 @@ import {
   formatFullName,
   hashToken,
   obfuscateName,
+  generateUniqueChangeLogUUID,
+  cleanTermsForPDF,
+  formatTermsForPDF
   // generateQuotePDF,
 } from "../util/util.js";
 
@@ -31,6 +36,8 @@ import {
 } from "../lib/email/index.js";
 import { supabase } from "../config/db.js";
 import { uploadImageToBucket, removeUploadedFiles, parseJSONField } from "../util/uploadHelpers.js";
+import path from "path";
+import fs from "fs";
 
 const QUOTE_IMAGES_BUCKET = "quote-images";
 const URGENT_FEE_AMOUNT = 200;
@@ -1084,13 +1091,7 @@ export const createQuote = async (req, res) => {
       }
     });
 
-    let changeLogUuid;
-    let existingChangeLog;
-
-    do {
-      changeLogUuid = generatePrefixedId("CL", 7);
-      existingChangeLog = await ChangeLog.findByUUID(changeLogUuid);
-    } while (existingChangeLog);
+    let changeLogUuid = await generateUniqueChangeLogUUID();
 
     createdChangeLog = await createChangeLogSafe({
       uuid: changeLogUuid,
@@ -1777,8 +1778,11 @@ export const updateQuoteByUUID = async (req, res) => {
       }
     }
 
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     if (Object.keys(changed_fields).length > 0) {
       await createChangeLogSafe({
+        uuid: changeLogUuid,
         table_name: "quotes",
         record_uuid: uuid,
         user_uuid: actorUserUuid,
@@ -2557,8 +2561,10 @@ export const updateQuoteByUUIDEmployee = async (req, res) => {
         };
       }
     }
+    let changeLogUUID = await generateUniqueChangeLogUUID();
 
     await createChangeLogSafe({
+      uuid: changeLogUUID,
       table_name: "quotes",
       record_uuid: finalQuote.uuid,
       user_uuid: actorUserUuid,
@@ -2626,8 +2632,11 @@ export const updateQuoteById = async (req, res) => {
       }
     }
 
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     if (Object.keys(changed_fields).length > 0) {
       await createChangeLogSafe({
+        uuid: changeLogUuid,
         table_name: "quotes",
         record_uuid: updated.uuid,
         user_uuid: actorUserUuid,
@@ -2667,8 +2676,9 @@ export const softDeleteQuote = async (req, res) => {
     }
 
     const deleted = await Quote.softDelete(uuid);
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -2723,7 +2733,10 @@ export const restoreQuote = async (req, res) => {
 
     const restored = await Quote.restore(uuid);
 
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -2767,8 +2780,9 @@ export const reinstateQuote = async (req, res) => {
     }
 
     const reinstated = await Quote.reinstate(uuid);
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -2808,8 +2822,9 @@ export const hardDeleteQuote = async (req, res) => {
     }
 
     const deleted = await Quote.hardDelete(uuid);
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -3527,8 +3542,9 @@ export const rejectQuote = async (req, res) => {
       secure: true,
       sameSite: "lax",
     });
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: rejectedQuote.uuid,
       user_uuid: actorUserUuid,
@@ -3581,8 +3597,9 @@ export const extendQuoteController = async (req, res) => {
     }
 
     const updatedQuote = await Quote.extendQuote(uuid, { newDate, addDays });
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -3623,8 +3640,9 @@ export const updateQuoteAndSendEmail = async (req, res) => {
       total_amount,
       status: status || "finalized",
     });
-
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -3769,7 +3787,9 @@ export const autoExpireQuote = async (req, res) => {
       });
     }
 
+    const changeLogUuid = await generateUniqueChangeLogUUID();
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: uuid,
       user_uuid: actorUserUuid,
@@ -3835,7 +3855,10 @@ export const linkCustomerToQuote = async (req, res) => {
       customer_uuid: customer.uuid,
     });
 
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
     await createChangeLogSafe({
+      uuid: changeLogUuid,
       table_name: "quotes",
       record_uuid: updatedQuote.uuid,
       user_uuid: actorUserUuid,

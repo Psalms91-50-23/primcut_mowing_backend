@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
-import { capitalize, formatMoney } from "../util/util.js";
+import { capitalize, formatMoney, formatTermsForPDF, cleanTermsForPDF } from "../util/util.js";
 
 // export const generateQuotePDF = async (quote, customer = null) => {
 //   const headerImagePath = path.join(

@@ -1,7 +1,7 @@
 import { supabase } from "../config/db.js";
 import { buildSearchOr } from '../util/util.js';
 import { normalizePhone, getPhoneCandidates, phoneMatches } from "../util/util.js";
-
+import Job from "./Job.js";
 export default class Quote {
 
     static async findByCustomerUUID(customerUuid) {

@@ -38,106 +38,6 @@ function isValidISODate(value) {
 
 const allowedFrequencies = ["one_off", "weekly", "fortnightly", "monthly"];
 
-// function normalizeJobScheduleInput(job = {}) {
-//   const {
-//     scheduled_at = null,
-//     scheduled_window_mins = null,
-//     scheduled_window_preset = null,
-//     is_recurring = false,
-//     recurrence_frequency = null,
-//     recurrence_interval = null,
-//     recurrence_end_date = null,
-//     regenerate_recurrences = false,
-//     send_schedule_email = false,
-//     notification_type = "schedule_update",
-//     notes = null,
-//     client_schedule_message = null,
-//   } = job;
-
-//   if (!(scheduled_at === null || isValidISODate(scheduled_at))) {
-//     throw new Error("job.scheduled_at must be a valid ISO date string or null");
-//   }
-
-//   const normalizedWindowMins =
-//     scheduled_window_mins === null || scheduled_window_mins === undefined
-//       ? null
-//       : Number(scheduled_window_mins);
-
-//   if (
-//     !(
-//       normalizedWindowMins === null ||
-//       (Number.isInteger(normalizedWindowMins) && normalizedWindowMins > 0)
-//     )
-//   ) {
-//     throw new Error("job.scheduled_window_mins must be a positive integer or null");
-//   }
-
-//   if (
-//     !(
-//       scheduled_window_preset === null ||
-//       ALLOWED_WINDOW_PRESETS.includes(scheduled_window_preset)
-//     )
-//   ) {
-//     throw new Error(
-//       `job.scheduled_window_preset must be one of: ${ALLOWED_WINDOW_PRESETS.join(", ")} or null`
-//     );
-//   }
-
-//   const normalizedRecurrenceInterval =
-//     recurrence_interval === null || recurrence_interval === undefined
-//       ? null
-//       : Number(recurrence_interval);
-
-//   if (is_recurring) {
-//     if (!allowedFrequencies.includes(recurrence_frequency)) {
-//       throw new Error(
-//         "job.recurrence_frequency must be one of: 'one_off', 'weekly', 'fortnightly', 'monthly' when recurring"
-//       );
-//     }
-
-//     if (
-//       !(
-//         Number.isInteger(normalizedRecurrenceInterval) &&
-//         normalizedRecurrenceInterval > 0
-//       )
-//     ) {
-//       throw new Error("job.recurrence_interval must be a positive integer when recurring");
-//     }
-//   }
-
-//   if (!(recurrence_end_date === null || isValidISODate(recurrence_end_date))) {
-//     throw new Error("job.recurrence_end_date must be a valid ISO date string or null");
-//   }
-
-//   const normalizedClientMessage =
-//     typeof client_schedule_message === "string"
-//       ? client_schedule_message.trim() || null
-//       : null;
-
-//   const normalizedNotes =
-//     typeof notes === "string"
-//       ? notes.trim() || null
-//       : null;
-
-//   const normalizedNotificationType =
-//     notification_type === "rescheduled" ? "rescheduled" : "schedule_update";
-
-//   return {
-//     scheduled_at,
-//     scheduled_window_mins: normalizedWindowMins,
-//     scheduled_window_preset,
-//     is_recurring: Boolean(is_recurring),
-//     recurrence_frequency: is_recurring ? recurrence_frequency : null,
-//     recurrence_interval: is_recurring ? normalizedRecurrenceInterval : null,
-//     recurrence_end_date: is_recurring ? recurrence_end_date : null,
-//     regenerate_recurrences: Boolean(regenerate_recurrences),
-//     send_schedule_email: Boolean(send_schedule_email),
-//     notification_type: normalizedNotificationType,
-//     notes: normalizedNotes,
-//     client_schedule_message: normalizedClientMessage,
-//   };
-// }
-
 function normalizeJobScheduleInput(job = {}) {
   const {
     scheduled_date = undefined,
@@ -315,6 +215,33 @@ function normalizeRecurrenceScheduleInput(recurrence = {}) {
     client_schedule_message,
   };
 }
+
+export const getScheduledJobs = async (req, res) => {
+  try {
+    const {
+      scheduledPreset,
+      scheduledStart,
+      scheduledEnd,
+      limit,
+      page,
+    } = req.query;
+
+    const result = await Job.listScheduledOccurrences({
+      scheduledPreset: typeof scheduledPreset === "string" ? scheduledPreset : undefined,
+      scheduledStart: typeof scheduledStart === "string" ? scheduledStart : undefined,
+      scheduledEnd: typeof scheduledEnd === "string" ? scheduledEnd : undefined,
+      limit: typeof limit === "string" ? Number(limit) : undefined,
+      page: typeof page === "string" ? Number(page) : undefined,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("getScheduledJobs error:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch scheduled jobs",
+    });
+  }
+};
 
 export const getJobsByCustomerUUID = async (req, res) => {
   const { uuid } = req.params;
@@ -1642,21 +1569,54 @@ export const getJobDetailedByUUID = async (req, res) => {
   }
 };
 
+// export const getAllJobs = async (req, res) => {
+//   try {
+//     const { status, limit, page, olderThan } = req.query;
+
+//     const result = await Job.list({
+//       status: typeof status === "string" ? status : undefined,
+//       limit: typeof limit === "string" ? Number(limit) : undefined,
+//       page: typeof page === "string" ? Number(page) : undefined,
+//       olderThanDays: typeof olderThan === "string" ? Number(olderThan) : undefined,
+//     });
+//     console.log({ result });
+//     return res.json(result);
+//   } catch (err) {
+//     console.error("listJobs error:", err?.message || err);
+//     return res.status(500).json({ error: err?.message || "Failed to fetch jobs" });
+//   }
+// };
+
 export const getAllJobs = async (req, res) => {
   try {
-    const { status, limit, page, olderThan } = req.query;
+    const {
+      status,
+      search,
+      scheduledPreset,
+      scheduledStart,
+      scheduledEnd,
+      limit,
+      page,
+      olderThan,
+    } = req.query;
 
     const result = await Job.list({
       status: typeof status === "string" ? status : undefined,
+      search: typeof search === "string" ? search : undefined,
+      scheduledPreset: typeof scheduledPreset === "string" ? scheduledPreset : undefined,
+      scheduledStart: typeof scheduledStart === "string" ? scheduledStart : undefined,
+      scheduledEnd: typeof scheduledEnd === "string" ? scheduledEnd : undefined,
       limit: typeof limit === "string" ? Number(limit) : undefined,
       page: typeof page === "string" ? Number(page) : undefined,
       olderThanDays: typeof olderThan === "string" ? Number(olderThan) : undefined,
     });
-    console.log({ result });
+
     return res.json(result);
   } catch (err) {
     console.error("listJobs error:", err?.message || err);
-    return res.status(500).json({ error: err?.message || "Failed to fetch jobs" });
+    return res.status(500).json({
+      error: err?.message || "Failed to fetch jobs",
+    });
   }
 };
 
