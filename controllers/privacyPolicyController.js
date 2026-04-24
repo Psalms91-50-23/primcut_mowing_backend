@@ -2,6 +2,7 @@ import PrivacyPolicy from "../models/PrivacyPolicy.js";
 import {
   generatePrefixedId,
 } from "../util/util.js";
+
 export const createPrivacyPolicy = async (req, res) => {
   
   try {

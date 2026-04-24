@@ -1226,6 +1226,7 @@ export default class Job {
         },
       };
     }
+    
     static async backfillJobAddressesFromQuotes() {
         // 1) get jobs missing job_address, include quote address
         const { data: jobs, error: fetchErr } = await supabase()

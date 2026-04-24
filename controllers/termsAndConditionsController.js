@@ -494,6 +494,7 @@ export const getTermsAndConditionsByUUID = async (req, res) => {
     });
   }
 };
+
 export const updateTermsAndConditions = async (req, res) => {
   try {
     const { uuid } = req.params;

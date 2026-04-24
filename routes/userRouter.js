@@ -36,7 +36,7 @@ router.get('/test', requireAuth, (req, res) => {
 });
 
 router.get('/all', getUsers);
-router.get('/auth/me', requireAuth, authenticatedRateLimit, requireRole(["admin","owner", "employee", "customer"]), getCurrentUser);
+router.get('/auth/me', requireAuth, authenticatedRateLimit, getCurrentUser);
 
 // router.get('/auth/check', requireAuth, checkCookiesExists);
 router.get('/auth/check',  checkCookiesExists);
@@ -44,17 +44,17 @@ router.post('/auth/login', authRateLimit, login);
 router.post('/auth/logout', logout);
 router.post('/auth/create/employee', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]), createUserEmptyEmployee);
 // router.post("/reset-password", sendPasswordResetEmail);
-router.get('/uuid/:uuid', getUserByUUID);
-router.get('/email', getUserByEmail);
-router.post('/register', registerUser);
-router.post('/verify', verifyEmail);
-router.post('/resend-verify-email', resendVerificationEmail);
-router.patch('/:uuid', updateUser);
-router.get('/auth-user/:authUserId', getUserByAuthUserId);
+router.get('/uuid/:uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getUserByUUID);
+router.get('/email', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getUserByEmail);
+router.post('/register', publicRateLimit, registerUser);
+router.post('/verify', publicRateLimit, verifyEmail);
+router.post('/resend-verify-email', publicRateLimit, resendVerificationEmail);
+router.patch('/:uuid', requireAuth, authenticatedRateLimit, requireRole(["admin","owner", "employee", "customer"]), updateUser);
+router.get('/auth-user/:authUserId', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]), getUserByAuthUserId);
 router.delete('/admin/hard-delete/uuid/:uuid', requireAuth, requireRole(["admin","owner"]), hardDeleteFull);
 router.delete('/admin/supabase-user/hard-delete', requireAuth, requireRole(["admin","owner"]), deleteUserByEmail);
-router.delete('/supabase-user/:authUserId', deleteSupabaseUser);
-router.delete('/hard-delete-local/uuid/:uuid', hardDeleteUserLocally);
+router.delete('/supabase-user/:authUserId', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]),deleteSupabaseUser);
+router.delete('/hard-delete-local/uuid/:uuid', requireAuth, authenticatedRateLimit, requireRole(["admin","owner"]), hardDeleteUserLocally);
 
 
 

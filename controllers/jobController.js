@@ -1648,7 +1648,7 @@ export const backfillJobAddresses = async (req, res) => {
 export const getJobByUUID = async (req, res) => {
   try {
     const { uuid } = req.params;
-
+    console.log(`job by uuid ${uuid}`)
     const job = await Job.findByUUID(uuid);
     if (!job) return res.status(404).json({ error: "Job not found" });
 
@@ -1781,7 +1781,7 @@ export const getJobByQuoteUUID = async (req, res) => {
   }
 
   try {
-    const job = await Job.findOneByQuoteUUID(quote_uuid);
+    const job = await Job.findJobByQuoteUUID(quote_uuid);
     if (!job) {
       return res.status(404).json({ error: 'Job not found' });
     }

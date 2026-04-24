@@ -21,13 +21,13 @@ import { requireRole } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // Public / customer-safe route
-router.get("/active", getActiveTermsAndConditions);
+router.get("/active", publicRateLimit, getActiveTermsAndConditions);
 // router.get("/active", getActiveTermsAndConditions);
 router.get("/active/admin", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getActiveTermsAndConditionsAdmin);
 
 // Admin / dashboard routes
-router.get("/", getAllTermsAndConditions);
-router.get("/:uuid", getTermsAndConditionsByUUID);
+router.get("/", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getActiveTermsAndConditionsAdmin, getAllTermsAndConditions);
+router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getActiveTermsAndConditionsAdmin, getTermsAndConditionsByUUID);
 router.post("/", requireAuth, authenticatedRateLimit, requireRole("admin", "owner"), createTermsAndConditions);
 router.patch("/:uuid", requireAuth, authenticatedRateLimit, requireRole("admin", "owner"), updateTermsAndConditions);
 router.patch("/:uuid/activate", requireAuth, authenticatedRateLimit, requireRole("admin", "owner"), setActiveTermsAndConditions);

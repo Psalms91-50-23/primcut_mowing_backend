@@ -605,8 +605,10 @@ export const updateRecurrenceAndNotifyClient = async (req, res) => {
         customer = result.customer;
         emailData = result.emailData;
       } catch (err) {
-        console.error("Failed to send recurrence notify email:", err.message);
-        emailError = err.message;
+        const message =
+          err?.message || "Failed to send recurrence notification email";
+        console.error("Failed to send recurrence notify email:", message);
+        emailError = message;
       }
     } else {
       emailError = "Customer email not found";
@@ -620,9 +622,9 @@ export const updateRecurrenceAndNotifyClient = async (req, res) => {
       action: "update",
       summary: emailSent
         ? "Job recurrence updated and client notified."
-        : "Job recurrence updated. Client notification attempted.",
+        : "Job recurrence updated. Client notification was attempted.",
       changed_fields: {
-        ...(result.changedFields || {}),
+        ...(result?.changedFields || {}),
         email_sent: {
           old: null,
           new: emailSent,
@@ -643,6 +645,8 @@ export const updateRecurrenceAndNotifyClient = async (req, res) => {
       emailError,
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      error: error?.message || "Failed to update recurrence and notify client",
+    });
   }
 };

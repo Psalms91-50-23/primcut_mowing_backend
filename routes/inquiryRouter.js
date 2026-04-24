@@ -23,12 +23,12 @@ import {
 const router = express.Router();
 
 // Public or authenticated submit
-router.post("/create", publicRateLimit, optionalAuth, createInquiry);
+router.post("/create", publicRateLimit, optionalAuth,  requireRole(["admin", "owner"]), createInquiry);
 
 router.get("/", getInquiries);
 router.get("/all", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getAllInquiries);
 
-router.get("/:uuid", getInquiryByUUID);
+router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getInquiryByUUID);
 // Staff only
 // router.get("/:uuid", getInquiryByUUID);
 // router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee", "customer"]), getInquiryByUUID);

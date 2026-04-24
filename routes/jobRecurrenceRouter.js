@@ -25,22 +25,23 @@ const router = express.Router();
 router.post('/temp/backfill-from-parent', tempBackfillRecurrenceServicesFromParent);
 
 // Create recurrence
-router.post('/', createJobRecurrence);
+router.post('/', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee"), createJobRecurrence);
 
 // Get recurrences for a job
-router.get('/job/:job_uuid', getRecurrencesByJobUUID);
+router.get('/job/:job_uuid', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee", "customer"), getRecurrencesByJobUUID);
 
 // Get single recurrence
-router.get('/:uuid', getRecurrenceByUUID);
+router.get('/:uuid', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee", "customer"), getRecurrenceByUUID);
 
 // General update
-router.patch('/:uuid', updateRecurrence);
+router.patch('/:uuid', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee", "customer"), updateRecurrence);
+
 router.patch('/:uuid/notify-client', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee"), updateRecurrenceAndNotifyClient);
 // Update status
-router.patch('/:uuid/complete', completeRecurrence);
-router.patch('/:uuid/missed', missRecurrence);
+router.patch('/:uuid/complete', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee"),  completeRecurrence);
+router.patch('/:uuid/missed', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee"), missRecurrence);
 
 // Delete recurrence
-router.delete('/:uuid', deleteRecurrence);
+router.delete('/:uuid', authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee"), deleteRecurrence);
 
 export default router;

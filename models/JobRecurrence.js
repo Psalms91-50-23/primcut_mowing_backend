@@ -1,5 +1,6 @@
 import { supabase } from '../config/db.js';
-import { generatePrefixedId } from '../util/util.js';
+import { generatePrefixedId, buildChangedFields } from '../util/util.js';
+
 
 function getDefaultRecurrenceCount(freq) {
   switch (freq) {
@@ -240,15 +241,14 @@ export default class JobRecurrence {
 
     if (job.customer_uuid) {
       const { data: customerData, error: customerError } = await supabase()
-        .from("users")
+        .from("customers")
         .select(`
           uuid,
           first_name,
           last_name,
-          full_name,
           email,
-          mobile,
-          landline,
+          mobile_phone,
+          landline_phone,
           address
         `)
         .eq("uuid", job.customer_uuid)
@@ -272,11 +272,10 @@ export default class JobRecurrence {
       recurrenceUUID: updated.uuid,
       recurrenceId: updated.id,
       customerName:
-        customer?.full_name ||
         [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") ||
         "Customer",
       customerEmail: customer?.email || null,
-      mobile: customer?.mobile || customer?.landline || null,
+      mobile: customer?.mobile_phone || customer?.landline_phone || null,
       address: job.job_address || customer?.address || null,
       services: safeServices,
       previousScheduledAt: existing.scheduled_at || null,
@@ -288,7 +287,7 @@ export default class JobRecurrence {
       dashboardLink: null,
     };
 
-    const changedFields = this.buildChangedFields(existing, updated, [
+    const changedFields = buildChangedFields(existing, updated, [
       "scheduled_at",
       "scheduled_window_mins",
       "scheduled_window_preset",

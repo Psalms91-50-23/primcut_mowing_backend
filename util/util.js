@@ -258,7 +258,7 @@ export const deleteAllFilesFromBucket = async () => {
   const bucketName = "quote-images";
 
   // List all files
-  const { data: files, error: listError } = await supabase
+  const { data: files, error: listError } = await supabase()
     .storage
     .from(bucketName)
     .list("", { limit: 1000 });
@@ -271,7 +271,7 @@ export const deleteAllFilesFromBucket = async () => {
   const filePaths = files.map((file) => file.name);
 
   // Delete files
-  const { error: deleteError } = await supabase
+  const { error: deleteError } = await supabase()
     .storage
     .from(bucketName)
     .remove(filePaths);
@@ -1176,6 +1176,24 @@ export function buildSearchOr(terms, columns) {
 
 //   return filters.join(",");
 // }
+
+export const buildChangedFields = (oldRecord = {}, newRecord = {}, keys = []) => {
+  const changedFields = {};
+
+  for (const key of keys) {
+    const oldValue = oldRecord?.[key] ?? null;
+    const newValue = newRecord?.[key] ?? null;
+
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      changedFields[key] = {
+        old: oldValue,
+        new: newValue,
+      };
+    }
+  }
+
+  return changedFields;
+};
 
 export const clampInt = (n, fallback, min, max) => {
   const x = parseInt(String(n), 10);

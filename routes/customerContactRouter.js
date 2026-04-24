@@ -27,7 +27,7 @@ router.post("/customers/uuid/:uuid/contacts", authenticatedRateLimit, requireAut
 // get contact by customer uuid
 router.get("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]) , getCustomerContactByUUID);
 
-router.get("/customer-contacts/uuid/:uuid/all", findAllByCustomerUUIDIncDelete);
+router.get("/customer-contacts/uuid/:uuid/all", authenticatedRateLimit, requireAuth, requireRole("admin", "owner", "employee", "customer"), findAllByCustomerUUIDIncDelete);
 
 // update one contact by contact uuid
 router.patch("/customer-contacts/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), updateCustomerContact);

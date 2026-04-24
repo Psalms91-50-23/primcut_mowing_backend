@@ -35,36 +35,36 @@ import {
 // /all?scheduledStart=2026-04-05&scheduledEnd=2026-04-12
 // /all?status=scheduled&scheduledStart=2026-04-05&scheduledEnd=2026-04-12
 // /all?search=jgrl5
-router.get('/all', getAllJobs);
-// router.get('/all', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getAllJobs);
+// router.get('/all', getAllJobs);
+router.get('/all', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getAllJobs);
 router.get("/scheduled", getScheduledJobs);
 router.post("/backfill-addresses", backfillJobAddresses);
 
 // router.get("/dashboard", getDashboardJobs);
 
-router.get('/uuid/:uuid', getJobByUUID);
+router.get('/uuid/:uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobByUUID);
 
 router.get('/:uuid/public-view', getPublicJobView);
 
 router.post('/from-quote/:quote_uuid', createJobFromQuote);
 
-router.get('/by-quote/:quote_uuid', getJobByQuoteUUID);
+router.get('/by-quote/:quote_uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobByQuoteUUID);
 
-router.delete('/uuid/:uuid', hardDeleteJobByUUID);
+router.delete('/uuid/:uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin"]), hardDeleteJobByUUID);
 
-router.get('/customer/:uuid', getJobsByCustomerUUID);
+router.get('/customer/:uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobsByCustomerUUID);
 
-router.patch('/uuid/:uuid', updateByUUID);
+router.patch('/uuid/:uuid', requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), updateByUUID);
 
-router.get("/:uuid/summary", getJobSummaryByUUID);
+router.get("/:uuid/summary", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobSummaryByUUID);
 
-router.get("/:uuid/details", getJobDetailedByUUID);
+router.get("/:uuid/details", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobDetailedByUUID);
 
-router.patch("/:uuid/schedule", updateJobSchedule);
+router.patch("/:uuid/schedule", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), updateJobSchedule);
 
-router.get("/:uuid/recurrences", getJobRecurrences);
+router.get("/:uuid/recurrences", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), getJobRecurrences);
 
-router.post("/:uuid/recurrences/extend", extendJobRecurrences);
+router.post("/:uuid/recurrences/extend", requireAuth, authenticatedRateLimit, requireRole(["owner", "admin", "employee"]), extendJobRecurrences);
 
 
 

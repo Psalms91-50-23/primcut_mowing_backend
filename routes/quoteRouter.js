@@ -59,10 +59,10 @@ router.get("/", requireAuth, authenticatedRateLimit, requireRole(["owner", "admi
 //PDF route for quote
 router.get("/:uuid/pdf", viewQuotePdf);
 // GET all quotes
-router.get("/all", getAllQuotes);
+router.get("/all", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getAllQuotes);
 
 // GET quote by ID
-router.get("/id/:id", getQuoteById);
+router.get("/id/:id", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteById);
 
 // router.get('/api/quotes/public', viewPublicQuote);
 
@@ -108,23 +108,23 @@ router.get("/public/limited/uuid/:uuid", getLimitedQuoteByUUID)
 router.patch("/public/reject/uuid/:uuid", rejectQuote)
 
 // SOFT DELETE
-router.patch("/soft-delete/uuid/:uuid", softDeleteQuote);
+router.patch("/soft-delete/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), softDeleteQuote);
 
 // RESTORE quote
-router.patch("/restore-delete/uuid/:uuid", restoreQuote);
+router.patch("/restore-delete/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]),  restoreQuote);
 // router.patch("/reinstate/uuid/:uuid", reinstateQuote);
 
 // HARD DELETE
 router.delete("/hard-delete/uuid/:uuid", requireAuth, requireRole(["owner", "admin"]), hardDeleteQuote);
 
 // EXTEND quote
-router.patch("/extend/uuid/:uuid", extendQuoteController);
+router.patch("/extend/uuid/:uuid", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee"]),  extendQuoteController);
 
 router.delete("/dev/delete-all-quote-images", deleteAllFilesFromBucket);
 
-router.get("/:uuid/summary", getQuoteSummaryByUUID);
+router.get("/:uuid/summary", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteSummaryByUUID);
 
-router.get("/:uuid/details", getQuoteDetailedByUUID);
+router.get("/:uuid/details", authenticatedRateLimit, requireAuth, requireRole(["owner", "admin","employee", "customer"]), getQuoteDetailedByUUID);
 
 router.patch("/public/link-customer/uuid/:uuid", linkCustomerToQuote );
 

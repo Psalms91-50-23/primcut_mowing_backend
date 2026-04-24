@@ -1,6 +1,6 @@
 import { supabase } from '../config/db.js';
 
-class User {
+export default class User {
 
   // Get all non-deleted users
   static async findAll() {
@@ -195,7 +195,4 @@ class User {
       
     }
 
-}
-
-
-export default User;
+};
