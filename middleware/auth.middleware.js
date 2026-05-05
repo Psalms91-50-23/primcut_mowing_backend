@@ -6,8 +6,7 @@ export async function requireAuth(req, res, next) {
   try {
     const accessToken = req.cookies.accessToken;
     const refreshToken = req.cookies.refreshToken;
-    // console.log("requireAuth cookies:", req.headers.cookie);
-    // console.log("requireAuth user:", req.user);
+
     let supabaseUser = null;
     const now = Math.floor(Date.now() / 1000);
 
@@ -102,7 +101,6 @@ export async function requireAuth(req, res, next) {
         user_metadata: supabaseUser.user_metadata,
       },
     };
-    // console.log(req.user, " in middle ware auth")
     next();
   } catch (err) {
     console.error("requireAuth error:", err);

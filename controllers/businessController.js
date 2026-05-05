@@ -54,8 +54,6 @@ const createBusiness = async (req, res) => {
     customer_uuid,
   } = req.body;
 
-  console.log(req.body, " creating a business");
-
   const normalizedEmail = email?.trim().toLowerCase();
   const trimmedName = name?.trim();
   const trimmedAddress = address?.trim();
@@ -114,7 +112,6 @@ const createBusiness = async (req, res) => {
         customer_type: "business",
       });
 
-      console.log({ linkedCustomerAfter });
     }
 
     const newBusinessData = {
@@ -409,7 +406,6 @@ const hardDeleteBusiness = async (req, res) => {
     }
 
     const deleted = await Business.delete(uuid);
-    console.log({ deleted });
 
     if (!deleted) {
       return res.status(500).json({ error: "Failed to delete business" });

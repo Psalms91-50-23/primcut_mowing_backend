@@ -184,7 +184,6 @@ const getCustomerById = async (req, res) => {
 
 const getCustomerByUUID = async (req, res) => {
   const { uuid } = req.params;
-  console.log({ uuid }, " get cust by uuid");
 
   if (!uuid) {
     return res.status(400).json({ error: "Missing customer UUID" });
@@ -192,7 +191,6 @@ const getCustomerByUUID = async (req, res) => {
 
   try {
     const customer = await Customer.findByUUID(uuid);
-    console.log({ customer });
 
     if (!customer) {
       return res.status(404).json({ error: `Customer not found with uuid ${uuid}` });
@@ -246,18 +244,14 @@ const hardDeleteCustomer = async (req, res) => {
     return res.status(400).json({ error: "Missing customer UUID" });
   }
 
-  console.log({ uuid });
-
   try {
     const tempDeletedCustomerHolder = await Customer.findByUUID(uuid);
-    console.log({ tempDeletedCustomerHolder });
 
     if (!tempDeletedCustomerHolder) {
       return res.status(404).json({ error: `Customer not found with UUID ${uuid}` });
     }
 
     const deleted = await Customer.delete(uuid);
-    console.log({ deleted });
 
     if (!deleted) {
       return res.status(404).json({ error: `Customer not deleted failed with UUID: ${uuid}` });
@@ -382,7 +376,6 @@ const updateCustomerById = async (req, res) => {
   const actorUserUuid = req.user?.uuid || null;
   const { id } = req.params;
   const updates = {};
-  console.log(req.body);
 
   try {
     const foundCustomer = await Customer.findById(id);
@@ -475,7 +468,6 @@ const updateCustomerByUUID = async (req, res) => {
   const actorUserUuid = req.user?.uuid || null;
   const { uuid } = req.params;
   const updates = {};
-  console.log(req.body);
 
   try {
     const foundCustomer = await Customer.findByUUID(uuid);
@@ -601,7 +593,6 @@ const linkCustomerToBusiness = async (req, res) => {
 
   try {
     const customer = await Customer.findByUUID(customer_uuid);
-    console.log({ customer });
 
     if (!customer) {
       return res.status(404).json({
@@ -827,7 +818,6 @@ const getCustomerQuotes = async (req, res) => {
 
     // ✅ then get quotes
     const quotes = await Customer.findQuotesByCustomerUUID(uuid);
-    console.log({quotes})
     return res.status(200).json(quotes || []);
   } catch (error) {
     return res.status(500).json({ error: error.message });

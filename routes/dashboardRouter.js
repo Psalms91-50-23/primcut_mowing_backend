@@ -19,8 +19,7 @@ const router = express.Router();
 router.get("/", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getDashboardJobs);
 
 router.get("/jobs", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getDashboardJobs);
-// router.get("/", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getDashboardJobs);
+router.get("/", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getDashboardJobs);
 router.get("/employee/stats", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getEmployeeDashboardStats);
-// router.get("/employee/stats", authenticatedRateLimit, requireAuth, requireRole("employee", "admin", "owner"), getEmployeeDashboardStats);
 
 export default router;

@@ -76,7 +76,6 @@ export default class User {
 
   // Find user by email
   static async findByEmail(email) {
-    console.log({email})
     const normalizedEmail = email?.trim().toLowerCase();
     const { data, error } = await supabase()
       .from('users')

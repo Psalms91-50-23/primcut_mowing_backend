@@ -1,4 +1,3 @@
-// controllers/recaptchaV2Controller.js
 import fetch from "node-fetch";
 
 /**

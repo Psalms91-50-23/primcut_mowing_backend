@@ -20,6 +20,7 @@ export const viewQuotePdf = async (req, res) => {
   if (!rawToken) return res.status(401).json({ message: "Missing token" });
 
   try {
+    
     // 1) Validate quote exists
     const quote = await Quote.findByUUID(uuid);
     if (!quote) return res.status(404).json({ message: "Quote not found" });
@@ -27,7 +28,6 @@ export const viewQuotePdf = async (req, res) => {
     // 2) Validate token (hash match + expiry)
     const token_hash = hashToken(rawToken);
 
-    // Implement this however your model is structured:
     // Should return the token row if valid and not revoked/expired, else null
     const tokenRow = await QuoteAccessToken.findValidToken({
       quote_uuid: uuid,

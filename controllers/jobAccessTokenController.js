@@ -89,8 +89,6 @@ export const validateJobAccessToken = async (req, res) => {
   const { uuid } = req.params;
   const { token } = req.body;
 
-  console.log("validate job token access as no cookies");
-
   if (!uuid || !token) {
     return res.status(400).json({ message: "Job UUID and token are required" });
   }

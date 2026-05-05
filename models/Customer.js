@@ -73,45 +73,6 @@ export default class Customer {
         return normalizedQuotes;
 
     }
-    // static async findQuotesByCustomerUUID(uuid) {
-    //     if (!uuid) {
-    //         throw new Error("Customer UUID is required");
-    //     }
-    //     const { data, error } = await supabase()
-    //         .from('quotes')
-    //         .select('*')
-    //         .eq('customer_uuid', uuid)
-    //         .eq("is_deleted", false)
-    //         .order('created_at', { ascending: false });
-
-    //     if (error) {
-    //         throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
-    //     }
-
-    //     const normalizedQuotes = (data || []).map((quote) => ({
-    //         ...quote,
-    //         quote_pdf_storage_path: quote.quote_pdf_url || null,
-    //         quote_pdf_url: getQuotePdfPublicUrl(quote.quote_pdf_url),
-    //     }));
-
-    //     return normalizedQuotes;
-    // }
-    // static async findQuotesByCustomerUUID(uuid) {
-    //     if (!uuid) {
-    //         throw new Error("Customer UUID is required");
-    //     }
-    //     const { data, error } = await supabase()
-    //         .from('quotes')
-    //         .select('*')
-    //         .eq('customer_uuid', uuid)
-    //         .eq("is_deleted", false)
-    //         .order('created_at', { ascending: false });
-
-    //     if (error) {
-    //         throw new Error(`Error fetching quotes for customer with UUID ${uuid}: ${error.message}`);
-    //     }
-    //     return data;
-    // }
 
     static async findJobsByCustomerUUID(uuid) {
         if (!uuid) {
@@ -138,34 +99,6 @@ export default class Customer {
         }));
     }
 
-    // static async searchSummary(query, limit = 10) {
-    //     const terms = String(query || "")
-    //     .trim()
-    //     .split(/\s+/)
-    //     .filter(Boolean);
-
-    //     if (terms.length === 0) return [];
-
-    //     const orFilter = buildSearchOr(terms, [
-    //     "uuid",
-    //     "first_name",
-    //     "last_name",
-    //     "email",
-    //     "mobile_phone",
-    //     "landline_phone",
-    //     "address",
-    //     ]);
-
-    //     const { data, error } = await supabase()
-    //     .from("customers")
-    //     .select("uuid, first_name, last_name, email, mobile_phone, landline_phone, address, created_at")
-    //     .or(orFilter)
-    //     .order("created_at", { ascending: false })
-    //     .limit(limit);
-
-    //     if (error) throw error;
-    //     return data || [];
-    // }
     static async searchSummary(query, limit = 10) {
         const rawQuery = String(query || "").trim();
         const terms = rawQuery.split(/\s+/).filter(Boolean);

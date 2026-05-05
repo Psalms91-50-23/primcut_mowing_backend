@@ -11,23 +11,7 @@ import {
   generateUniqueChangeLogUUID
 } from "../util/util.js";
 
-/**
- * Safe change log writer
- * Will never break the main request flow if logging fails
- */
-// export const generateUniqueChangeLogUUID = async () => {
-//   let uuid;
-//   let exists;
-
-//   do {
-//     uuid = generatePrefixedId("CL", 7);
-//     exists = await ChangeLog.findByUUID(uuid);
-//   } while (exists);
-
-//   return uuid;
-// };
-
-// 1️⃣ Request password reset
+//  Request password reset
 export const requestPasswordReset = async (req, res) => {
   const { email, recaptchaToken, recaptchaVersion } = req.body;
 
@@ -65,7 +49,7 @@ export const requestPasswordReset = async (req, res) => {
     });
 
     const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${resetToken.token}`;
-    console.log({userData});
+
     await resetPasswordLink({
       to: userData.email,
       name: formatFullName(userData.first_name, undefined, true) || "There",
@@ -103,7 +87,7 @@ export const requestPasswordReset = async (req, res) => {
   }
 };
 
-// 2️⃣ Reset password using token
+// Reset password using token
 export const resetPassword = async (req, res) => {
   const { token, newPassword } = req.body;
 
@@ -189,7 +173,7 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// 3️⃣ Check reset token validity
+// Check reset token validity
 export const checkResetToken = async (req, res) => {
   const { token } = req.body;
 

@@ -125,25 +125,6 @@ export default class CustomerContact {
     return data;
   }
 
-  // static async softDeleteByUUID(uuid) {
-  //   const now = new Date().toISOString();
-
-  //   const { data, error, count } = await supabase()
-  //     .from(this.tableName)
-  //     .update({
-  //       is_deleted: true,
-  //       deleted_at: now,
-  //       updated_at: now,
-  //     })
-  //     .eq("uuid", uuid)
-  //     .eq("is_deleted", false)
-  //     .select("*")
-  //     .maybeSingle();
-
-  //   if (error) throw new Error(error.message);
-  //   return data;
-  // }
-
   static async softDeleteByUUID(uuid) {
     const now = new Date().toISOString();
 

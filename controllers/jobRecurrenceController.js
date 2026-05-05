@@ -243,7 +243,6 @@ export const updateRecurrence = async (req, res) => {
       status,
       clear_service_override,
     } = req.body || {};
-    console.log(req.body, "body");
     const updates = {};
 
     if (scheduled_at !== undefined) {

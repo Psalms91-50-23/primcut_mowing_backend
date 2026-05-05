@@ -17,7 +17,6 @@ export const createPrivacyPolicy = async (req, res) => {
       is_active,
     } = req.body || {};
 
-    console.log(req.body)
     if (!version?.trim()) {
       return res.status(400).json({ error: "Version is required" });
     }

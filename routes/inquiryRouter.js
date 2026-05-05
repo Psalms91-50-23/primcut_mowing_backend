@@ -29,9 +29,6 @@ router.get("/", getInquiries);
 router.get("/all", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getAllInquiries);
 
 router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), getInquiryByUUID);
-// Staff only
-// router.get("/:uuid", getInquiryByUUID);
-// router.get("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee", "customer"]), getInquiryByUUID);
 
 router.patch("/:uuid", authenticatedRateLimit, requireAuth, requireRole(["admin", "owner", "employee"]), updateInquiryByUUID);
 

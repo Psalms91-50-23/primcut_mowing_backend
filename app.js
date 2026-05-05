@@ -33,7 +33,6 @@ import { errorHandler } from './middleware/error.middleware.js';
 const app = express();
 
 // Determine allowed CORS origins
-// let allowedOrigins = [];
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
@@ -41,7 +40,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL_HAPPY_PROPERTY
 ].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i);
 
-// console.log({allowedOrigins})
+
 app.use(cookieParser());
 app.use(express.json());
 

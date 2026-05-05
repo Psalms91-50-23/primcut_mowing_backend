@@ -81,19 +81,6 @@ export const normalizeNZPhone = (phone) => {
   return "+64" + phone;
 };
 
-// export const normalizeNZPhone = (phone) => {
-//   if (!phone?.trim()) return null;
-
-//   phone = phone.replace(/\D/g, "");
-
-//   // Short landlines missing leading 0
-//   if (phone.length === 7 || (phone.length === 8 && /^[2-9]/.test(phone))) {
-//     phone = "0" + phone;
-//   }
-
-//   return "+64" + (phone.startsWith("0") ? phone.slice(1) : phone);
-// };
-
 export const obfuscatePhoneNumber = (phone) => {
   if (!phone) return "";
 

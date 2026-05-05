@@ -121,7 +121,6 @@ export const getCustomerContacts = async (req, res) => {
 
   try {
     const contacts = await CustomerContact.findContactsByCustomerUUID(uuid);
-    console.log({contacts})
     return res.status(200).json({
       contacts: contacts || [],
     });
@@ -140,7 +139,6 @@ export const getCustomerContactByUUID = async (req, res) => {
     }
 
     const contact = await CustomerContact.findAllByCustomerUUID(uuid);
-    console.log({contact})
     if (!contact) {
       return res.status(404).json({ error: "Customer contact not found" });
     }
@@ -161,7 +159,6 @@ export const findAllByCustomerUUIDIncDelete = async (req, res) => {
     }
 
     const contact = await CustomerContact.findAllByCustomerUUIDIncDelete(uuid);
-    console.log({contact})
     if (!contact) {
       return res.status(404).json({ error: "Customer contact not found" });
     }

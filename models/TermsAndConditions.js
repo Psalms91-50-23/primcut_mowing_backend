@@ -1,53 +1,4 @@
 import { supabase } from '../config/db.js';
-// import { createClient } from "@supabase()/supabase()-js";
-/**
- * TermsAndConditions Model
- *
- * Notes:
- * - uuid is a prefixed public ID (e.g. TCxxxxxxx)
- * - updated_at is NOT set in the model
- * - updated_at is automatically handled by a Postgres trigger
- *
- * Trigger reference:
- * create trigger update_terms_updated_at
- * before update on terms_and_conditions
- * for each row
- * execute function update_updated_at_column();
- * 
- * code below
- * 
- * create or replace function update_updated_at_column()
-  returns trigger as $$
-  begin
-    new.updated_at = now();
-    return new;
-  end;
-  $$ language plpgsql;
-
-  create trigger update_terms_updated_at
-  before update on terms_and_conditions
-  for each row
-  execute function update_updated_at_column();
-
-  used saver version
-
-  drop trigger if exists update_terms_updated_at on public.terms_and_conditions;
-
-  create trigger update_terms_updated_at
-  before update on public.terms_and_conditions
-  for each row
-  execute function update_updated_at_column();
-
-  create or replace function update_updated_at_column()
-  returns trigger as $$
-  begin
-    if row(new.*) is distinct from row(old.*) then
-      new.updated_at = now();
-    end if;
-    return new;
-  end;
-  $$ language plpgsql;
- */
 
 class TermsAndConditions {
   static tableName = "terms_and_conditions";
@@ -110,59 +61,6 @@ class TermsAndConditions {
     return data;
   }
   
-  // static async create({
-  //   uuid,
-  //   version,
-  //   title,
-  //   content,
-  //   short_summary = null,
-  //   pdf_url = null,
-  //   pdf_storage_path = null,
-  //   is_active = false,
-  // }) {
-  //   const now = new Date().toISOString();
-
-  //   if (!uuid) {
-  //     throw new Error("Terms and conditions UUID is required");
-  //   }
-
-  //   if (!version) {
-  //     throw new Error("Version is required");
-  //   }
-
-  //   if (!title) {
-  //     throw new Error("Title is required");
-  //   }
-
-  //   if (!content) {
-  //     throw new Error("Content is required");
-  //   }
-
-  //   const payload = {
-  //     uuid,
-  //     version,
-  //     title,
-  //     content,
-  //     short_summary,
-  //     pdf_url,
-  //     pdf_storage_path,
-  //     is_active,
-  //     created_at: now,
-  //   };
-
-  //   const { data, error } = await supabase()
-  //     .from(this.tableName)
-  //     .insert([payload])
-  //     .select("*")
-  //     .single();
-
-  //   if (error) {
-  //     throw new Error(`Error creating terms and conditions: ${error.message}`);
-  //   }
-
-  //   return data;
-  // }
-
   static async findActive() {
 
     const { data, error } = await supabase()
@@ -190,38 +88,6 @@ class TermsAndConditions {
 
     return data || [];
   }
-
-  // static async findActive() {
-  //   const { data, error } = await supabase()
-  //     .from(this.tableName)
-  //     .select("*")
-  //     .eq("is_active", true)
-  //     .order("updated_at", { ascending: false })
-  //     .limit(1)
-  //     .maybeSingle();
-
-  //   if (error) {
-  //     throw new Error(`Error fetching active terms and conditions: ${error.message}`);
-  //   }
-
-  //   return data || null;
-  // }
-  // static async findActive() {
-  //   const { data, error } = await supabase()
-  //     .from(this.tableName)
-  //     .select("*")
-  //     .eq("is_active", true)
-  //     .order("updated_at", { ascending: false });
-
-  //   console.log("findActive rows:", data);
-  //   console.log("findActive error:", error);
-
-  //   if (error) {
-  //     throw new Error(`Error fetching active terms and conditions: ${error.message}`);
-  //   }
-
-  //   return data?.[0] || null;
-  // }
 
   static async findByUUID(uuid) {
     if (!uuid) {

@@ -35,7 +35,6 @@ router.get("/uuid/:uuid", publicRateLimit, getPrivacyPolicyByUUID);
  */
 router.get("/", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"),  listPrivacyPolicies);
 router.get("/versions", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getPrivacyPolicyVersions);
-// router.get("/versions", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getPrivacyPolicyVersions);
 router.post("/", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), createPrivacyPolicy);
 router.patch("/activate/:uuid", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), activatePrivacyPolicy);
 

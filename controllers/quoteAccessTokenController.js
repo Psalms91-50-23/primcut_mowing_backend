@@ -239,7 +239,6 @@ export const viewPublicQuote = async (req, res) => {
     }
 
     const quote = await Quote.findByUUID(tokenRecord.quote_uuid);
-    console.log({ quote }, " view public quote");
 
     if (!quote || quote.status === "draft") {
       return res.status(404).json({ error: "Quote not available" });
@@ -261,8 +260,6 @@ export const viewPublicQuote = async (req, res) => {
 export const validateQuoteAccessToken = async (req, res) => {
   const { uuid } = req.params;
   const { token } = req.body;
-
-  console.log("validate quote token access as no cookies");
 
   if (!uuid || !token) {
     return res.status(400).json({ message: "Quote UUID and token are required" });
@@ -339,42 +336,6 @@ export const validateQuoteAccessToken = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-// export const validateQuoteSession = async (req, res) => {
-//   try {
-//     const sessionToken = req.cookies?.quote_session;
-
-//     if (!sessionToken) {
-//       return res.status(401).json({ message: "No active session" });
-//     }
-
-//     const tokenHash = hashToken(sessionToken);
-
-//     const tokenRecord = await QuoteAccessToken.findByTokenHash(tokenHash);
-
-//     if (!tokenRecord) {
-//       return res.status(401).json({ message: "Invalid or expired session" });
-//     }
-
-//     const quote = await Quote.findByUUID(tokenRecord.quote_uuid);
-//     if (!quote || quote.status === "draft") {
-//       return res.status(404).json({ message: "Quote not available" });
-//     }
-
-//     const now = new Date();
-//     const quoteExpiry = new Date(quote.expiry_end);
-//     if (quoteExpiry < now) {
-//       return res.status(401).json({ message: "Quote has expired" });
-//     }
-
-//     await QuoteAccessToken.incrementViewCount(tokenRecord.uuid);
-
-//     return res.status(200).json({ quote });
-//   } catch (err) {
-//     console.error("Session validation error:", err);
-//     return res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 export const validateQuoteSession = async (req, res) => {
   try {
