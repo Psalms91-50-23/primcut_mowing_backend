@@ -243,6 +243,1332 @@ export const getQuoteByUUID = async (req, res) => {
   }
 };
 
+export const createQuote = async (req, res) => {
+  let newQuote = null;
+  let quoteAccessToken = null;
+  let uploadedImages = [];
+  let createdPrivacyAcceptance = null;
+  let createdChangeLog = null;
+
+  const rollbackSteps = [];
+
+  try {
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    const {
+      customer_uuid,
+      first_name,
+      last_name,
+      mobile,
+      landline,
+      preferred_contact_method,
+      email,
+      message,
+      address,
+      recurrence_frequency,
+      urgent,
+      privacy_consent,
+    } = req.body;
+
+    const services = Array.isArray(req.body.services)
+      ? req.body.services
+      : parseJSONField(req.body.services, []);
+
+    const imageLabels = Array.isArray(req.body.image_labels)
+      ? req.body.image_labels
+      : req.body.image_labels
+      ? [req.body.image_labels]
+      : [];
+
+    const isUrgentRequested = urgent === true || urgent === "true";
+    const hasPrivacyConsent =
+      privacy_consent === true || privacy_consent === "true";
+
+    const actorUserUuid = req.user?.uuid || null;
+
+    let actorUser = null;
+    let actorCustomer = null;
+    let existingCustomer = null;
+
+    let source = "public_form";
+
+    if (actorUserUuid) {
+      actorUser = await User.findByUUID(actorUserUuid);
+
+      if (actorUser?.role === "customer") {
+        source = "public_form";
+
+        if (actorUser.customer_uuid) {
+          actorCustomer = await Customer.findByUUID(actorUser.customer_uuid);
+        }
+      } else {
+        source = "dashboard";
+      }
+    }
+
+    const resolvedFirstName = (
+      first_name?.trim() ||
+      actorCustomer?.first_name ||
+      actorUser?.first_name ||
+      ""
+    ).trim();
+
+    const resolvedLastName = (
+      last_name?.trim() ||
+      actorCustomer?.last_name ||
+      actorUser?.last_name ||
+      ""
+    ).trim();
+
+    const resolvedEmail = (
+      email?.trim().toLowerCase() ||
+      actorCustomer?.email ||
+      actorUser?.email ||
+      null
+    );
+
+    const resolvedMobile =
+      mobile?.trim() || actorCustomer?.mobile_phone || null;
+
+    const resolvedLandline =
+      landline?.trim() || actorCustomer?.landline_phone || null;
+
+    const resolvedAddress = (
+      address?.trim() ||
+      actorCustomer?.address ||
+      ""
+    ).trim();
+
+    const allowedRecurrenceFrequencies = [
+      "one_off",
+      "weekly",
+      "fortnightly",
+      "monthly",
+    ];
+
+    const normalizedRecurrenceFrequency = allowedRecurrenceFrequencies.includes(
+      recurrence_frequency
+    )
+      ? recurrence_frequency
+      : "one_off";
+
+    if (!hasPrivacyConsent) {
+      return res.status(400).json({
+        error:
+          "Privacy policy consent is required before submitting a quote request.",
+      });
+    }
+
+    const activePrivacyPolicy = await PrivacyPolicy.findActive();
+
+    if (!activePrivacyPolicy) {
+      return res.status(400).json({
+        error:
+          "No active privacy policy is available at the moment. Please try again later.",
+      });
+    }
+
+    if (!resolvedFirstName || !resolvedLastName) {
+      return res.status(400).json({
+        error: "First name and last name are required",
+      });
+    }
+
+    if (!resolvedMobile && !resolvedLandline) {
+      return res.status(400).json({
+        error: "Please provide either a mobile or landline number",
+      });
+    }
+
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({
+        error: "At least one service is required",
+      });
+    }
+
+    if (!resolvedAddress) {
+      return res.status(400).json({
+        error: "Address is required",
+      });
+    }
+
+    if (resolvedEmail) {
+      existingCustomer = await Customer.findByEmail(resolvedEmail);
+
+      if (existingCustomer?.is_blacklisted) {
+        return res.status(403).json({
+          error: "We are unable to process this request at this time.",
+          code: "CUSTOMER_BLACKLISTED",
+        });
+      }
+    }
+
+    const resolvedCustomerUuid =
+      customer_uuid ||
+      actorCustomer?.uuid ||
+      actorUser?.customer_uuid ||
+      existingCustomer?.uuid ||
+      null;
+
+    const cleanedServices = services
+      .map((service) => {
+        if (!service || typeof service !== "object") return null;
+
+        const service_uuid =
+          typeof service.service_uuid === "string"
+            ? service.service_uuid.trim()
+            : null;
+
+        const code =
+          typeof service.code === "string" ? service.code.trim() : null;
+
+        const label =
+          typeof service.label === "string" ? service.label.trim() : null;
+
+        const description =
+          typeof service.description === "string" && service.description.trim()
+            ? service.description.trim()
+            : null;
+
+        const quantity =
+          service.quantity !== undefined && service.quantity !== null
+            ? Number(service.quantity)
+            : null;
+
+        const unit =
+          typeof service.unit === "string" ? service.unit.trim() : null;
+
+        const unit_price =
+          service.unit_price !== undefined && service.unit_price !== null
+            ? Number(service.unit_price)
+            : null;
+
+        const line_total =
+          service.line_total !== undefined && service.line_total !== null
+            ? Number(service.line_total)
+            : null;
+
+        if (!service_uuid && !code && !label) return null;
+
+        return {
+          service_uuid,
+          code,
+          label,
+          description,
+          quantity,
+          unit,
+          unit_price,
+          line_total,
+        };
+      })
+      .filter(Boolean);
+
+    if (cleanedServices.length === 0) {
+      return res.status(400).json({
+        error: "At least one valid service is required",
+      });
+    }
+
+    if (isUrgentRequested && cleanedServices.length !== 1) {
+      return res.status(400).json({
+        error:
+          "Only 1 urgent request can be done per job. Please select one urgent-eligible service only.",
+      });
+    }
+
+    if (isUrgentRequested) {
+      const selectedService = cleanedServices[0];
+
+      let dbService = null;
+
+      try {
+        if (selectedService.service_uuid) {
+          dbService = await Service.getByUUID(selectedService.service_uuid);
+        }
+
+        if (!dbService && selectedService.code) {
+          dbService = await Service.getByCode(selectedService.code);
+        }
+      } catch (serviceError) {
+        console.error("Service validation failed:", serviceError);
+        return res.status(400).json({
+          error: "Selected service could not be validated.",
+        });
+      }
+
+      if (!dbService) {
+        return res.status(400).json({
+          error: "Selected service could not be validated.",
+        });
+      }
+
+      if (!dbService.is_active || dbService.is_deleted) {
+        return res.status(400).json({
+          error: "Selected service is not currently available.",
+        });
+      }
+
+      if (!dbService.urgent_allowed) {
+        return res.status(400).json({
+          error: "Urgent booking is not available for the selected service.",
+        });
+      }
+    }
+
+    const normalizedMobile = resolvedMobile
+      ? normalizeNZPhone(resolvedMobile)
+      : null;
+
+    const normalizedLandline = resolvedLandline
+      ? normalizeNZPhone(resolvedLandline)
+      : null;
+
+    const allowedMethods = ["mobile", "landline", "email"];
+
+    const normalizedPreferredContactMethod = allowedMethods.includes(
+      preferred_contact_method
+    )
+      ? preferred_contact_method
+      : normalizedMobile
+      ? "mobile"
+      : normalizedLandline
+      ? "landline"
+      : "email";
+
+    let uuid;
+    let exists;
+
+    do {
+      uuid = generatePrefixedId("Q", 8);
+      exists = await Quote.findByUUID(uuid);
+    } while (exists);
+
+    if (files.length > 10) {
+      return res.status(400).json({
+        error: "You can upload a maximum of 10 images.",
+      });
+    }
+
+    uploadedImages = [];
+
+    for (let i = 0; i < files.length; i += 1) {
+      const uploaded = await uploadImageToBucket({
+        bucket: QUOTE_IMAGES_BUCKET,
+        folder: `quotes/${uuid}`,
+        file: files[i],
+        index: i,
+      });
+
+      uploadedImages.push({
+        label:
+          typeof imageLabels[i] === "string" && imageLabels[i].trim()
+            ? imageLabels[i].trim()
+            : `Image ${i + 1}`,
+        url: uploaded.url,
+        path: uploaded.path,
+        file_name: uploaded.file_name,
+        mime_type: uploaded.mime_type,
+        size: uploaded.size,
+        uploaded_at: uploaded.uploaded_at,
+      });
+    }
+
+    rollbackSteps.push(async () => {
+      if (uploadedImages.length) {
+        await removeUploadedFiles({
+          bucket: QUOTE_IMAGES_BUCKET,
+          files: uploadedImages,
+        });
+      }
+    });
+
+    const actionToken = crypto.randomBytes(32).toString("hex");
+    const actionTokenHash = crypto
+      .createHash("sha256")
+      .update(actionToken)
+      .digest("hex");
+
+    const tokenExpiresAt = new Date();
+    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 2);
+
+    const newQuoteData = {
+      uuid,
+      customer_uuid: resolvedCustomerUuid,
+      contact_first_name: resolvedFirstName,
+      contact_last_name: resolvedLastName,
+      contact_mobile: normalizedMobile,
+      contact_landline: normalizedLandline,
+      preferred_contact_method: normalizedPreferredContactMethod,
+      contact_email: resolvedEmail,
+      message: message?.trim() || null,
+      services: cleanedServices,
+      subtotal_amount: 0,
+      gst_amount: 0,
+      total_amount: 0,
+      status: "draft",
+      has_urgent_fee: isUrgentRequested,
+      urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+      is_quote_sent_to_client: false,
+      quote_sent_at: null,
+      address: resolvedAddress,
+      images: uploadedImages,
+      responded_at: null,
+      sent_by_user_uuid: actorUserUuid,
+      recurrence_frequency: normalizedRecurrenceFrequency,
+    };
+
+    newQuote = await Quote.create(newQuoteData);
+    if (!newQuote) {
+      throw new Error("Failed to create quote");
+    }
+
+    rollbackSteps.push(async () => {
+      if (newQuote?.uuid) {
+        await Quote.hardDelete(newQuote.uuid);
+      }
+    });
+
+    const acceptanceUuidExists = async (candidate) => {
+      const existing = await PrivacyPolicyAcceptance.findByUUID(candidate);
+      return !!existing;
+    };
+
+    let acceptanceUuid;
+    let acceptanceExists;
+
+    do {
+      acceptanceUuid = generatePrefixedId("PPA", 7);
+      acceptanceExists = await acceptanceUuidExists(acceptanceUuid);
+    } while (acceptanceExists);
+
+    createdPrivacyAcceptance = await PrivacyPolicyAcceptance.create({
+      uuid: acceptanceUuid,
+      privacy_policy_uuid: activePrivacyPolicy.uuid,
+      version: activePrivacyPolicy.version,
+      quote_uuid: newQuote.uuid,
+      acceptance_source: "quote_form",
+      accepted_at: new Date().toISOString(),
+      ip_address:
+        req.headers["x-forwarded-for"]?.toString().split(",")[0].trim() ||
+        req.socket?.remoteAddress ||
+        null,
+      user_agent: req.headers["user-agent"] || null,
+    });
+
+    rollbackSteps.push(async () => {
+      if (createdPrivacyAcceptance?.uuid) {
+        await PrivacyPolicyAcceptance.hardDeleteByUUID(
+          createdPrivacyAcceptance.uuid
+        );
+      }
+    });
+
+    let changeLogUuid = await generateUniqueChangeLogUUID();
+
+    createdChangeLog = await createChangeLogSafe({
+      uuid: changeLogUuid,
+      table_name: "quotes",
+      record_uuid: newQuote.uuid,
+      user_uuid: actorUserUuid,
+      action: "create",
+      summary: actorUserUuid
+        ? `Quote ${newQuote.uuid} created by logged-in user`
+        : `Quote ${newQuote.uuid} created from public form`,
+      changed_fields: {
+        uuid: { old: null, new: newQuote.uuid },
+        customer_uuid: { old: null, new: resolvedCustomerUuid },
+        contact_first_name: { old: null, new: resolvedFirstName },
+        contact_last_name: { old: null, new: resolvedLastName },
+        contact_mobile: { old: null, new: normalizedMobile },
+        contact_landline: { old: null, new: normalizedLandline },
+        preferred_contact_method: {
+          old: null,
+          new: normalizedPreferredContactMethod,
+        },
+        contact_email: { old: null, new: resolvedEmail },
+        message: { old: null, new: message?.trim() || null },
+        address: { old: null, new: resolvedAddress },
+        services: { old: null, new: cleanedServices },
+        images: { old: null, new: uploadedImages },
+        status: { old: null, new: "draft" },
+        is_quote_sent_to_client: { old: null, new: false },
+        sent_by_user_uuid: { old: null, new: actorUserUuid },
+        recurrence_frequency: {
+          old: null,
+          new: normalizedRecurrenceFrequency,
+        },
+        has_urgent_fee: { old: null, new: isUrgentRequested },
+        urgent_fee_amount: {
+          old: null,
+          new: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+        },
+        privacy_policy_uuid: { old: null, new: activePrivacyPolicy.uuid },
+        privacy_policy_version: { old: null, new: activePrivacyPolicy.version },
+        privacy_consent: { old: null, new: true },
+      },
+      source,
+    });
+
+    rollbackSteps.push(async () => {
+      if (createdChangeLog?.uuid) {
+        await ChangeLog.hardDeleteByUUID(createdChangeLog.uuid);
+      }
+    });
+
+    let tokenUuid;
+    let existsToken;
+
+    do {
+      tokenUuid = generatePrefixedId("QT", 7);
+      existsToken = await QuoteAccessToken.findByUUID(tokenUuid);
+    } while (existsToken);
+
+    quoteAccessToken = await QuoteAccessToken.create({
+      quote_uuid: newQuote.uuid,
+      token_hash: actionTokenHash,
+      expires_at: tokenExpiresAt,
+      uuid: tokenUuid,
+    });
+
+    rollbackSteps.push(async () => {
+      if (quoteAccessToken?.uuid) {
+        await QuoteAccessToken.revokeToken(quoteAccessToken.uuid);
+      }
+    });
+
+    const employeeLink = `${process.env.CLIENT_URL}/employee/quotes/${uuid}`;
+    const subjectHeader = `New Quote Request from ${formatFullName(
+      resolvedFirstName,
+      resolvedLastName,
+      false
+    )} Quote #${uuid}`;
+
+    await sendQuoteToBusiness({
+      quoteUuid: uuid,
+      firstName: formatFullName(resolvedFirstName, null, true),
+      lastName: formatFullName(null, resolvedLastName, true),
+      mobile: normalizedMobile ?? "-",
+      landline: normalizedLandline ?? "-",
+      email: resolvedEmail,
+      message: message?.trim() || null,
+      services: cleanedServices,
+      images: uploadedImages,
+      employeeLink,
+      address: resolvedAddress,
+      recurrenceFrequency: normalizedRecurrenceFrequency,
+      subjectHeader,
+      has_urgent_fee: isUrgentRequested,
+      urgent_fee_amount: isUrgentRequested ? URGENT_FEE_AMOUNT : 0,
+    });
+
+    return res.status(201).json({
+      data: newQuote,
+      privacy_policy_acceptance_uuid: createdPrivacyAcceptance?.uuid || null,
+    });
+  } catch (error) {
+    console.error("createQuote error:", error);
+
+    for (let i = rollbackSteps.length - 1; i >= 0; i -= 1) {
+      try {
+        await rollbackSteps[i]();
+      } catch (rollbackError) {
+        console.error(`Rollback step ${i} failed:`, rollbackError);
+      }
+    }
+
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+export const updateQuoteByUUID = async (req, res) => {
+  const { uuid } = req.params;
+  
+  if (!uuid) {
+    return res.status(400).json({ message: "Quote uuid is required" });
+  }
+  
+  const actorUserUuid = req.user?.uuid || null;
+  try {
+    const existingQuote = await Quote.findByUUID(uuid);
+
+    if (!existingQuote) {
+      return res.status(404).json({ message: "Quote not found" });
+    }
+
+    const {
+      services,
+      status,
+      preferred_contact_method,
+      contact_first_name,
+      contact_last_name,
+      contact_mobile,
+      contact_landline,
+      contact_email,
+      expiry_end,
+      employer_message,
+    } = req.body;
+
+    const allowedStatus = ["draft", "sent", "accepted", "expired", "rejected"];
+    const allowedContact = ["mobile", "landline", "email"];
+
+    if (status && !allowedStatus.includes(status)) {
+      return res.status(400).json({ message: "Invalid status value" });
+    }
+
+    if (
+      preferred_contact_method &&
+      !allowedContact.includes(preferred_contact_method)
+    ) {
+      return res.status(400).json({ message: "Invalid preferred contact method" });
+    }
+
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({ message: "Services are required" });
+    }
+
+    for (const s of services) {
+      if (typeof s.unit_price !== "number" || s.unit_price < 0) {
+        return res.status(400).json({ message: "Invalid unit price" });
+      }
+
+      if (typeof s.quantity !== "number" || s.quantity <= 0) {
+        return res.status(400).json({ message: "Invalid quantity" });
+      }
+    }
+
+    const subtotal_amount = parseFloat(
+      services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0).toFixed(2)
+    );
+    const gst_amount = parseFloat((subtotal_amount * 0.15).toFixed(2));
+    const total_amount = parseFloat((subtotal_amount + gst_amount).toFixed(2));
+
+    const updateData = {
+      services,
+      subtotal_amount,
+      gst_amount,
+      total_amount,
+      contact_first_name: contact_first_name ?? existingQuote.contact_first_name,
+      contact_last_name: contact_last_name ?? existingQuote.contact_last_name,
+      contact_mobile: contact_mobile ?? existingQuote.contact_mobile,
+      contact_landline: contact_landline ?? existingQuote.contact_landline,
+      contact_email: contact_email ?? existingQuote.contact_email,
+      employer_message: employer_message ?? "",
+    };
+
+    if (status) {
+      updateData.status = status;
+    }
+
+    if (preferred_contact_method) {
+      updateData.preferred_contact_method = preferred_contact_method;
+    }
+
+    if (expiry_end) {
+      updateData.expiry_end = new Date(expiry_end).toISOString();
+    }
+
+    const updated = await Quote.updateByUUID(uuid, updateData);
+
+    if (!updated) {
+      return res.status(400).json({
+        message: `Failed to update quote with uuid: ${uuid}`,
+      });
+    }
+
+    const changed_fields = {};
+
+    for (const key of Object.keys(updateData)) {
+      if (
+        JSON.stringify(existingQuote?.[key] ?? null) !==
+        JSON.stringify(updated?.[key] ?? null)
+      ) {
+        changed_fields[key] = {
+          old: existingQuote?.[key] ?? null,
+          new: updated?.[key] ?? null,
+        };
+      }
+    }
+
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
+    if (Object.keys(changed_fields).length > 0) {
+      await createChangeLogSafe({
+        uuid: changeLogUuid,
+        table_name: "quotes",
+        record_uuid: uuid,
+        user_uuid: actorUserUuid,
+        action: "update",
+        summary: "Quote updated in database only.",
+        changed_fields,
+        source: "dashboard",
+      });
+    }
+
+    return res.status(200).json({ quote: updated });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const updateQuoteByUUIDEmployee = async (req, res) => {
+  const { uuid } = req.params;
+
+  if (!uuid) {
+    return res.status(400).json({ message: "Quote uuid is required" });
+  }
+
+  const actorUserUuid = req.user?.uuid || null;
+
+  let existingQuote;
+  let quoteSnapshot = null;
+  let filePath = null;
+
+  try {
+    existingQuote = await Quote.findByUUID(uuid);
+
+    if (!existingQuote) {
+      return res.status(404).json({
+        message: `Quote not found with uuid: ${uuid}`,
+      });
+    }
+
+    quoteSnapshot = JSON.parse(JSON.stringify(existingQuote));
+
+    if (existingQuote.status !== "draft") {
+      return res.status(400).json({
+        message: "Quote cannot be dispatched in current state",
+      });
+    }
+
+    if (existingQuote.is_quote_sent_to_client) {
+      return res.status(400).json({
+        message: "Quote has already been sent to client",
+      });
+    }
+
+    const {
+      services,
+      subtotal_amount,
+      gst_amount,
+      total_amount,
+      preferred_contact_method,
+      contact_first_name,
+      contact_last_name,
+      contact_mobile,
+      contact_landline,
+      expiry_end,
+      sent_by_user_uuid,
+      employer_message,
+      has_urgent_fee,
+      urgent_fee_amount,
+      recurrence_frequency,
+    } = req.body;
+
+    const allowedContact = ["mobile", "landline", "email"];
+
+    if (
+      preferred_contact_method &&
+      !allowedContact.includes(preferred_contact_method)
+    ) {
+      return res.status(400).json({
+        message: "Invalid preferred contact method",
+      });
+    }
+
+    const allowedRecurrenceFrequencies = [
+      "one_off",
+      "weekly",
+      "fortnightly",
+      "monthly",
+    ];
+
+    const normalizedRecurrenceFrequency = allowedRecurrenceFrequencies.includes(
+      recurrence_frequency
+    )
+      ? recurrence_frequency
+      : existingQuote.recurrence_frequency || "one_off";
+
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({
+        message: "Services must be a non-empty array",
+      });
+    }
+
+    for (const s of services) {
+      if (typeof s.unit_price !== "number" || s.unit_price < 0) {
+        return res.status(400).json({
+          message: "Unit price must be a positive number",
+        });
+      }
+
+      if (typeof s.quantity !== "number" || s.quantity <= 0) {
+        return res.status(400).json({
+          message: "Quantity must be greater than zero",
+        });
+      }
+    }
+
+    const servicesSubtotal = parseFloat(
+      services.reduce((sum, s) => sum + s.unit_price * s.quantity, 0).toFixed(2)
+    );
+
+    const safeHasUrgentFee = Boolean(has_urgent_fee);
+    const safeUrgentFee = safeHasUrgentFee
+      ? parseFloat(Number(urgent_fee_amount ?? 0).toFixed(2))
+      : 0;
+
+    if (safeUrgentFee < 0) {
+      return res.status(400).json({
+        message: "Urgent fee must be zero or greater",
+      });
+    }
+
+    const calcSubtotal = parseFloat((servicesSubtotal + safeUrgentFee).toFixed(2));
+    const calcGST = parseFloat((calcSubtotal * 0.15).toFixed(2));
+    const calcTotal = parseFloat((calcSubtotal + calcGST).toFixed(2));
+
+    if (parseFloat(Number(subtotal_amount).toFixed(2)) !== calcSubtotal) {
+      return res.status(400).json({
+        message: "Subtotal mismatch",
+        expected: calcSubtotal,
+        received: subtotal_amount,
+      });
+    }
+
+    if (parseFloat(Number(gst_amount).toFixed(2)) !== calcGST) {
+      return res.status(400).json({
+        message: "GST mismatch",
+        expected: calcGST,
+        received: gst_amount,
+      });
+    }
+
+    if (parseFloat(Number(total_amount).toFixed(2)) !== calcTotal) {
+      return res.status(400).json({
+        message: "Total mismatch",
+        expected: calcTotal,
+        received: total_amount,
+      });
+    }
+
+    const sentAt = new Date();
+
+    const exactMinExpiryDate = new Date(
+      sentAt.getTime() + MIN_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+    );
+
+    const allowCustomFromDate = new Date(
+      sentAt.getTime() + (MIN_EXPIRY_DAYS + 1) * 24 * 60 * 60 * 1000
+    );
+
+    let expiry_end_date;
+
+    if (expiry_end) {
+      if (
+        typeof expiry_end === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(expiry_end)
+      ) {
+        const [year, month, day] = expiry_end.split("-").map(Number);
+
+        expiry_end_date = new Date(sentAt);
+        expiry_end_date.setFullYear(year, month - 1, day);
+      } else {
+        expiry_end_date = new Date(expiry_end);
+      }
+    } else {
+      expiry_end_date = new Date(exactMinExpiryDate);
+    }
+
+    if (Number.isNaN(expiry_end_date.getTime())) {
+      return res.status(400).json({
+        message: "Invalid expiry date",
+      });
+    }
+
+    if (expiry_end_date < allowCustomFromDate) {
+      expiry_end_date = new Date(exactMinExpiryDate);
+    }
+
+    const quoteSentAt = sentAt.toISOString();
+
+    const activeTerms = await TermsAndConditions.findActive();
+
+    if (!activeTerms) {
+      return res.status(400).json({
+        message: "No active terms and conditions found",
+      });
+    }
+
+    if (!activeTerms.pdf_storage_path) {
+      return res.status(400).json({
+        message: "Active terms and conditions PDF is missing",
+      });
+    }
+
+    const updatePayload = {
+      services,
+      subtotal_amount: calcSubtotal,
+      gst_amount: calcGST,
+      total_amount: calcTotal,
+      has_urgent_fee: safeHasUrgentFee,
+      urgent_fee_amount: safeUrgentFee,
+      recurrence_frequency: normalizedRecurrenceFrequency,
+      expiry_end: expiry_end_date.toISOString(),
+      status: "sent",
+      is_quote_sent_to_client: true,
+      quote_sent_at: quoteSentAt,
+      sent_by_user_uuid: sent_by_user_uuid ?? null,
+      preferred_contact_method,
+      contact_mobile,
+      contact_landline,
+      contact_first_name,
+      contact_last_name,
+      employer_message: employer_message ?? "",
+      quote_version_reason: "employee_sent",
+      terms_uuid: activeTerms.uuid,
+      terms_version: activeTerms.version,
+      terms_pdf_url: activeTerms.pdf_url ?? null,
+    };
+
+    let logoBuffer = null;
+
+    try {
+      const logoPath = path.join(process.cwd(), "assets", "happy-house-header.png");
+      logoBuffer = fs.readFileSync(logoPath);
+    } catch (err) {
+      console.error("Logo load failed:", err.message);
+    }
+
+    const pdfBuffer = await generateQuotePDF(
+      {
+        ...existingQuote,
+        ...updatePayload,
+      },
+      null,
+      logoBuffer
+    );
+
+    const result = await Quote.dispatchQuote(uuid, { ...updatePayload }, pdfBuffer);
+    const finalQuote = result.updated;
+    filePath = result.filePath;
+
+    const recipientEmail = finalQuote.contact_email?.trim().toLowerCase();
+
+    if (!recipientEmail) {
+      return res.status(400).json({
+        message: "Contact email is required",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(recipientEmail)) {
+      return res.status(400).json({
+        message: "Contact email is invalid",
+      });
+    }
+
+    const termsPdfBuffer = await downloadTermsPDFBuffer(activeTerms.pdf_storage_path);
+
+    await QuoteAccessToken.revokeAllForQuote(finalQuote.uuid);
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const token_hash = hashToken(rawToken);
+
+    let tokenUUID;
+    let exists;
+
+    do {
+      tokenUUID = generatePrefixedId("QT", 7);
+      exists = await QuoteAccessToken.findByUUID(tokenUUID);
+    } while (exists);
+
+    await QuoteAccessToken.create({
+      quote_uuid: finalQuote.uuid,
+      token_hash,
+      expires_at: new Date(finalQuote.expiry_end).toISOString(),
+      uuid: tokenUUID,
+    });
+
+    const quoteLink = `${process.env.CLIENT_URL}/quotes/view/${finalQuote.uuid}?token=${rawToken}`;
+
+    await sendQuoteToClient({
+      to: recipientEmail,
+      subject: `Your Quote #${finalQuote.uuid} ${formatFullName(
+        finalQuote.contact_first_name,
+        finalQuote.contact_last_name,
+        false
+      )} is Ready`,
+      data: {
+        quoteUUID: finalQuote.uuid,
+        name: formatFullName(
+          finalQuote.contact_first_name,
+          finalQuote.contact_last_name,
+          false
+        ),
+        mobile: finalQuote.contact_mobile ?? "",
+        landline: finalQuote.contact_landline ?? "",
+        message: finalQuote.message ?? "",
+        email: recipientEmail,
+        subtotal: finalQuote.subtotal_amount,
+        gst: finalQuote.gst_amount,
+        total: finalQuote.total_amount,
+        services: finalQuote.services,
+        images: finalQuote.images,
+        quoteLink,
+        quotePdfUrl: finalQuote.quote_pdf_url ?? "",
+        expiry: formatExpiry(finalQuote.expiry_end),
+        employer_message: finalQuote.employer_message ?? "",
+        recurrence_frequency: finalQuote.recurrence_frequency ?? "one_off",
+        has_urgent_fee: finalQuote.has_urgent_fee,
+        urgent_fee_amount: finalQuote.urgent_fee_amount,
+        termsVersion: activeTerms.version ?? "",
+        termsTitle: activeTerms.title ?? "",
+        termsUrl: activeTerms.pdf_url ?? "",
+        termsSummary: activeTerms.short_summary ?? "",
+      },
+      pdfBuffer,
+      termsPdfBuffer,
+      termsFileName: `terms-and-conditions-${activeTerms.version}.pdf`,
+    });
+
+    const fieldsToTrack = [
+      "services",
+      "subtotal_amount",
+      "gst_amount",
+      "total_amount",
+      "expiry_end",
+      "status",
+      "is_quote_sent_to_client",
+      "quote_sent_at",
+      "sent_by_user_uuid",
+      "preferred_contact_method",
+      "contact_mobile",
+      "contact_landline",
+      "contact_first_name",
+      "contact_last_name",
+      "employer_message",
+      "recurrence_frequency",
+      "quote_version_reason",
+      "quote_pdf_url",
+      "quote_pdf_storage_path",
+      "pdf_version",
+      "quote_pdf_version",
+      "terms_uuid",
+      "terms_version",
+      "terms_pdf_url",
+      "has_urgent_fee",
+      "urgent_fee_amount",
+    ];
+
+    const changed_fields = {};
+
+    for (const field of fieldsToTrack) {
+      const beforeValue = quoteSnapshot?.[field] ?? null;
+      const afterValue = finalQuote?.[field] ?? null;
+
+      if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
+        changed_fields[field] = {
+          old: beforeValue,
+          new: afterValue,
+        };
+      }
+    }
+    let changeLogUUID = await generateUniqueChangeLogUUID();
+
+    await createChangeLogSafe({
+      uuid: changeLogUUID,
+      table_name: "quotes",
+      record_uuid: finalQuote.uuid,
+      user_uuid: actorUserUuid,
+      action: "update",
+      summary:
+        "Employee updated draft quote, generated PDF, attached T&C PDF, and sent quote to client",
+      changed_fields,
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: "Quote updated and sent successfully",
+      quote: finalQuote,
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (quoteSnapshot) {
+      try {
+        await Quote.updateByUUID(uuid, quoteSnapshot);
+      } catch (rollbackError) {
+        console.error("Database rollback failed:", rollbackError);
+      }
+    }
+
+    try {
+      await QuoteAccessToken.revokeAllForQuote(uuid);
+    } catch (e) {
+      console.error("Token rollback failed:", e);
+    }
+
+    if (filePath) {
+      try {
+        await supabase().storage.from("quotes-pdf").remove([filePath]);
+      } catch (storageError) {
+        console.error("Storage rollback failed:", storageError);
+      }
+    }
+
+    return res.status(500).json({
+      error: error.message || "Failed to finalize quote",
+    });
+  }
+};
+
+export const updateQuoteById = async (req, res) => {
+  const { id } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  try {
+    const existing = await Quote.findById(id);
+    if (!existing) {
+      return res.status(404).json({ error: "Quote not found" });
+    }
+
+    const updated = await Quote.updateById(id, req.body);
+
+    const changed_fields = {};
+    for (const key of Object.keys(req.body || {})) {
+      if (JSON.stringify(existing?.[key] ?? null) !== JSON.stringify(updated?.[key] ?? null)) {
+        changed_fields[key] = {
+          old: existing?.[key] ?? null,
+          new: updated?.[key] ?? null,
+        };
+      }
+    }
+
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
+    if (Object.keys(changed_fields).length > 0) {
+      await createChangeLogSafe({
+        uuid: changeLogUuid,
+        table_name: "quotes",
+        record_uuid: updated.uuid,
+        user_uuid: actorUserUuid,
+        action: "update",
+        summary: "Quote updated by ID.",
+        changed_fields,
+        source: "dashboard",
+      });
+    }
+
+    return res.status(200).json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Soft delete
+export const softDeleteQuote = async (req, res) => {
+  const { uuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Quote UUID is required" });
+  }
+
+  try {
+    const quote = await Quote.findByUUID(uuid);
+    if (!quote) {
+      return res.status(404).json({ error: "Quote not found" });
+    }
+
+    if (quote.is_deleted || quote.deleted_at) {
+      return res.status(200).json({
+        message: "Quote already deleted",
+        data: quote,
+      });
+    }
+
+    const deleted = await Quote.softDelete(uuid);
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+    await createChangeLogSafe({
+      uuid: changeLogUuid,
+      table_name: "quotes",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "delete",
+      summary: "Quote soft deleted.",
+      changed_fields: {
+        is_deleted: {
+          old: quote.is_deleted ?? false,
+          new: deleted.is_deleted ?? true,
+        },
+        deleted_at: {
+          old: quote.deleted_at ?? null,
+          new: deleted.deleted_at ?? new Date().toISOString(),
+        },
+        previous_status: {
+          old: quote.previous_status ?? null,
+          new: deleted.previous_status ?? quote.status ?? null,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: "Quote soft-deleted",
+      data: deleted,
+    });
+  } catch (error) {
+    console.error("Soft delete quote failed:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const restoreQuote = async (req, res) => {
+  const { uuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Quote UUID is required" });
+  }
+
+  try {
+    const quote = await Quote.findByUUID(uuid);
+    if (!quote) {
+      return res.status(404).json({ error: "Quote not found" });
+    }
+
+    if (!quote.is_deleted && !quote.deleted_at) {
+      return res.status(400).json({
+        error: "Quote is not deleted, nothing to restore",
+      });
+    }
+
+    const restored = await Quote.restore(uuid);
+
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+
+    await createChangeLogSafe({
+      uuid: changeLogUuid,
+      table_name: "quotes",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "update",
+      summary: "Quote restored.",
+      changed_fields: {
+        is_deleted: {
+          old: quote.is_deleted ?? true,
+          new: restored.is_deleted ?? false,
+        },
+        deleted_at: {
+          old: quote.deleted_at ?? null,
+          new: restored.deleted_at ?? null,
+        },
+        status: {
+          old: quote.status ?? null,
+          new: restored.status ?? quote.previous_status ?? null,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: "Quote restored successfully",
+      data: restored,
+    });
+  } catch (error) {
+    console.error("Restore quote failed:", error);
+    return res.status(500).json({ error: error.message || "Server error" });
+  }
+};
+
+export const reinstateQuote = async (req, res) => {
+  const { uuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  try {
+    const existing = await Quote.findByUUID(uuid);
+    if (!existing) {
+      return res.status(404).json({ error: "Quote not found" });
+    }
+
+    const reinstated = await Quote.reinstate(uuid);
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+    await createChangeLogSafe({
+      uuid: changeLogUuid,
+      table_name: "quotes",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "update",
+      summary: "Quote reinstated.",
+      changed_fields: {
+        is_deleted: {
+          old: existing.is_deleted ?? true,
+          new: reinstated.is_deleted ?? false,
+        },
+        deleted_at: {
+          old: existing.deleted_at ?? null,
+          new: reinstated.deleted_at ?? null,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json(reinstated);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const hardDeleteQuote = async (req, res) => {
+  const { uuid } = req.params;
+  const actorUserUuid = req.user?.uuid || null;
+
+  if (!uuid) {
+    return res.status(400).json({ error: "Quote UUID is required" });
+  }
+
+  try {
+    const quote = await Quote.findByUUID(uuid);
+    if (!quote) {
+      return res.status(404).json({ error: "Quote not found" });
+    }
+
+    const deleted = await Quote.hardDelete(uuid);
+    const changeLogUuid = await generateUniqueChangeLogUUID();
+    await createChangeLogSafe({
+      uuid: changeLogUuid,
+      table_name: "quotes",
+      record_uuid: uuid,
+      user_uuid: actorUserUuid,
+      action: "delete",
+      summary: "Quote permanently deleted.",
+      changed_fields: {
+        deleted_record: {
+          uuid: quote.uuid,
+          customer_uuid: quote.customer_uuid,
+          status: quote.status,
+          contact_first_name: quote.contact_first_name,
+          contact_last_name: quote.contact_last_name,
+          contact_email: quote.contact_email,
+          total_amount: quote.total_amount,
+          quote_pdf_url: quote.quote_pdf_url,
+        },
+      },
+      source: "dashboard",
+    });
+
+    return res.status(200).json({
+      message: "Quote permanently deleted",
+      data: deleted,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 export const acceptQuote = async (req, res) => {
   const { uuid } = req.params;
   const { customer_uuid } = req.body;
