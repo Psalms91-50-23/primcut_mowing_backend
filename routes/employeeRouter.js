@@ -10,8 +10,6 @@ import { requireRole } from '../middleware/role.middleware.js';
 
 const router = express.Router();
 
-// CRUD routes
-
 // Register new employee (admin only)
 router.post('/register', requireAuth, authenticatedRateLimit, requireRole(["admin", "owner"]), createEmployee );
 

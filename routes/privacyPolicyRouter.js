@@ -31,7 +31,7 @@ router.get("/uuid/:uuid", publicRateLimit, getPrivacyPolicyByUUID);
 
 /**
  * Admin routes
- * add your auth middleware if needed
+ * add auth middleware if needed
  */
 router.get("/", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"),  listPrivacyPolicies);
 router.get("/versions", authenticatedRateLimit, requireAuth, requireRole("admin", "owner"), getPrivacyPolicyVersions);
