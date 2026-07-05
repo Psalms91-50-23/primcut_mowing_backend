@@ -8,19 +8,19 @@ The backend uses **Supabase** for authentication, database storage, and secure d
 
 This project was previously deployed and fully functional in a production-like environment. The live deployment has since been retired as the project is no longer actively maintained.
 
-The source code, architecture, and implementation remain available for review. Screenshots and documentation are included to demonstrate the application's functionality and design.
-
 Key features included:
 
 User authentication and authorization
-Property management workflows
-Automated email notifications
+Role-based access control for Owners and Customers
+Property and customer management workflows
 Quote and request management
-Role-based access control
+Automated email notifications and account verification
 Supabase database integration
-Audit logging and business process automation
+Audit logging and change tracking
+Automated business processes, including quote expiry and background jobs
+Responsive web interface for business and customer interactions
 
-A live demonstration can be redeployed if required.
+A demonstration environment can be redeployed if required.
 
 ### Key Backend Features
 
