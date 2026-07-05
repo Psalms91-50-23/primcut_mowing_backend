@@ -4,6 +4,24 @@ The Happy Lawns backend is built to support a service-based lawn care booking an
 
 The backend uses **Supabase** for authentication, database storage, and secure data access. Email confirmation is used during sign-up so users must verify their email address before accessing protected features.
 
+### Project Status
+
+This project was previously deployed and fully functional in a production-like environment. The live deployment has since been retired as the project is no longer actively maintained.
+
+The source code, architecture, and implementation remain available for review. Screenshots and documentation are included to demonstrate the application's functionality and design.
+
+Key features included:
+
+User authentication and authorization
+Property management workflows
+Automated email notifications
+Quote and request management
+Role-based access control
+Supabase database integration
+Audit logging and business process automation
+
+A live demonstration can be redeployed if required.
+
 ### Key Backend Features
 
 * User authentication with email confirmation
